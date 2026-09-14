@@ -4,7 +4,40 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [0.10.0] - 2026-09-14
+
+### Added
+- **`CHRONOS_CHANGEPOINT_MIN_DELTA`** — an optional floor on
+  `|mean_before − mean_after|` in the outcome's own units, applied
+  alongside the standardised shift rather than instead of it. Defaults to
+  `0` (disabled), so existing behaviour is unchanged.
+
+  The standardised test divides by pooled stddev, which is the series' own
+  variability, so on a metric that barely moves any change at all scores
+  as many sigma. Seen in a real deployment: health headroom went from
+  0.9050 to 0.9072 — an improvement of two tenths of one percent — and
+  reported 7.98 sigma at confidence 1.00. Correct, and far too small to
+  act on. The floor lets a deployment say how much movement is worth a
+  signal. Opt-in because only the adapter knows the outcome's scale.
+
+### Fixed
+- **`google.golang.org/grpc` to v1.83.2**, clearing GHSA-vp52-pcj8-j9qc
+  (heap memory exhaustion via HTTP/2 DATA frame fragmentation) and
+  GHSA-2v4p-qf9q-27wj (xDS server DoS). Note the second advisory carries a
+  fix version per release line — 1.82.2 on 1.82.x, 1.83.2 on 1.83.x — so
+  1.83.1 clears the first and remains inside the second.
+
 ## [Unreleased]
+
+> **Bookkeeping note.** The entries below were written against
+> `[Unreleased]` and never moved when 0.7.0, 0.8.0 and 0.9.0 were tagged;
+> several of them verifiably shipped in those releases (content-addressed
+> `PerceptionID` and the `outlier_cluster` nil-series validation are both
+> present in the v0.9.0 tree). They are left in place rather than
+> reassigned, because guessing which release each landed in would put
+> false history into the file this project calls its stability record.
+> Worth an audit against the tags.
+
 
 ### Changed
 - **No Homebrew cask.** Chronos is a Go library (optional `cmd/chronos` for
