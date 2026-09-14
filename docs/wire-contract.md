@@ -139,6 +139,10 @@ Detects a step change in the mean of the outcome metric — a sustained shift be
 - **Evidence.Score**: regime mean (so consumers can read the before / after means without joining metrics).
 - **Signal.Metrics**:
   - `shift` — `|mean_before − mean_after| / pooled_stddev` (always positive).
+    Note this is standardised by the series' own variability, so a series
+    that barely moves yields a large shift for a small change. Pair with
+    `CHRONOS_CHANGEPOINT_MIN_DELTA` when the outcome is bounded and small
+    changes are not actionable.
   - `split_index` — index of the first observation in the post-change regime (0-based).
   - `mean_before`, `mean_after` — the two regime means.
   - `delta_mean` — signed change (`mean_after − mean_before`).

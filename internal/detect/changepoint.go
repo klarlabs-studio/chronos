@@ -70,6 +70,18 @@ func (c *ChangePoint) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 		if bestK < 0 || bestShift < c.cfg.ChangePointMinShift {
 			continue
 		}
+		// A shift can clear the standardised threshold on movement far
+		// too small to act on, because the denominator is the series'
+		// own variability: a metric that sits still varies in the fourth
+		// decimal place, so a change in the third divides out to many
+		// sigma. When a deployment declares how much movement matters,
+		// require that too.
+		if c.cfg.ChangePointMinDelta > 0 {
+			delta := math.Abs(mean(ys[:bestK]) - mean(ys[bestK:]))
+			if delta < c.cfg.ChangePointMinDelta {
+				continue
+			}
+		}
 		signals = append(signals, c.build(scopeID, series, observations, ys, bestK, bestShift))
 	}
 	return signals

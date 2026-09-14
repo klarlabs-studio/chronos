@@ -61,6 +61,16 @@ type Config struct {
 	// Detection — ChangePoint (best-split mean-shift)
 	ChangePointMinShift  float64 // Minimum |Δmean / pooled_stddev| to emit
 	ChangePointMinPoints int     // Minimum points required (split needs ≥ 2 either side)
+	// ChangePointMinDelta is a minimum |Δmean| in the outcome's own
+	// units, applied alongside the standardised shift. Zero disables it,
+	// which is the default and the historical behaviour.
+	//
+	// The standardised test divides by pooled stddev, so on a series that
+	// barely varies any movement at all scores as a large shift. That is
+	// correct — the change is real and statistically unmistakable — but
+	// on a bounded outcome it reports changes too small to act on. This
+	// floor lets a deployment say how much movement is worth a signal.
+	ChangePointMinDelta float64
 
 	// Detection — OutlierCluster (cohort-level anomaly clusters)
 	OutlierClusterMinSeries  int           // Minimum series sharing a cluster
@@ -154,6 +164,7 @@ func Default() *Config {
 
 		ChangePointMinShift:  defaultEnvFloat64("CHRONOS_CHANGEPOINT_MIN_SHIFT", 1.5),
 		ChangePointMinPoints: defaultEnvInt("CHRONOS_CHANGEPOINT_MIN_POINTS", 8),
+		ChangePointMinDelta:  defaultEnvFloat64("CHRONOS_CHANGEPOINT_MIN_DELTA", 0),
 
 		OutlierClusterMinSeries:  defaultEnvInt("CHRONOS_OUTLIER_CLUSTER_MIN_SERIES", 3),
 		OutlierClusterZ:          defaultEnvFloat64("CHRONOS_OUTLIER_CLUSTER_Z", 2.5),
