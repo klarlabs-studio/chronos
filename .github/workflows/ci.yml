@@ -1,18 +1,20 @@
 name: CI
 
+# No paths-ignore. Skipping CI for documentation-only changes saves a few
+# minutes and costs the ability to merge them at all: the jobs below are
+# required contexts, a skipped workflow reports nothing rather than
+# success, and branch protection then blocks the pull request forever with
+# no failing check to point at. A changelog-only change sat BLOCKED with
+# zero pending checks and no failures, which is a confusing state to
+# debug.
+#
+# Running the full suite on a prose change is wasteful. It is less
+# wasteful than a documentation change that cannot be merged.
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
 
 permissions:
   contents: read
