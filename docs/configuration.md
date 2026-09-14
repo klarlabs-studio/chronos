@@ -29,6 +29,7 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_CORRELATION_MIN_POINTS` | `5` | Correlation | Minimum aligned observations between two series. |
 | `CHRONOS_CHANGEPOINT_MIN_SHIFT` | `1.5` | ChangePoint | Minimum standardised mean shift (`|Δmean| / pooled_stddev`) to emit. |
 | `CHRONOS_CHANGEPOINT_MIN_POINTS` | `8` | ChangePoint | Minimum observations required (split needs ≥ 2 each side). |
+| `CHRONOS_CHANGEPOINT_MIN_DELTA` | `0` | ChangePoint | Minimum `|mean_before − mean_after|` in the outcome's own units, required in addition to the standardised shift. `0` (default) disables it. Use on a bounded outcome where a very stable series makes any movement score as many sigma. |
 | `CHRONOS_OUTLIER_CLUSTER_MIN_SERIES` | `3` | OutlierCluster | Minimum distinct series in a single time bucket to emit. |
 | `CHRONOS_OUTLIER_CLUSTER_Z` | `2.5` | OutlierCluster | Per-series \|z-score\| threshold for an observation to count as an outlier. |
 | `CHRONOS_OUTLIER_CLUSTER_WINDOW` | `5m` | OutlierCluster | Sliding-window width for "around the same time". |
