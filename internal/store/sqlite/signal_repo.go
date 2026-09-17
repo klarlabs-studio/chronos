@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/felixgeelhaar/chronos/internal/ports"
@@ -134,6 +135,21 @@ func (r *SignalRepository) Count(ctx context.Context, filter ports.SignalFilter)
 	var n int64
 	if err := r.conn.DB.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("signal count: %w", err)
+	}
+	return n, nil
+}
+
+// DeleteSignalsOlderThan removes signals detected before cutoff.
+// signal_evidence goes with them via ON DELETE CASCADE.
+func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.conn.DB.ExecContext(ctx,
+		`DELETE FROM signals WHERE detected_at < ?`, formatTime(cutoff))
+	if err != nil {
+		return 0, fmt.Errorf("signal retention: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("signal retention: rows affected: %w", err)
 	}
 	return n, nil
 }

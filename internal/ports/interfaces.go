@@ -12,12 +12,19 @@ package ports
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/felixgeelhaar/chronos"
 	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/google/uuid"
 )
+
+// ErrNotImplemented is returned by a provider asked for a capability it
+// does not support. Callers are expected to degrade rather than fail —
+// but to degrade visibly, since a capability silently doing nothing is
+// how an operator ends up believing a setting took effect.
+var ErrNotImplemented = errors.New("capability not implemented by this provider")
 
 // EntityStateRepository persists and loads time-series observations. The
 // vision describes Chronos's intake as "Ingest(ctx, TimeSeriesPoint)";
@@ -198,4 +205,20 @@ type SignalRepository interface {
 
 	// Count returns the number of signals matching filter.
 	Count(ctx context.Context, filter SignalFilter) (int64, error)
+}
+
+// SignalRetainer advertises bounded retention over the signals table.
+//
+// It is a capability rather than part of SignalRepository because the
+// signals table is otherwise append-only — a signal, once detected, is
+// a historical fact and nothing in the system revises it. Retention is
+// the one exception, and it is an operator's decision about storage,
+// not a domain operation.
+//
+// Deleting a signal deletes its evidence with it; the SQL backends rely
+// on ON DELETE CASCADE for that.
+type SignalRetainer interface {
+	// DeleteSignalsOlderThan removes every signal detected strictly
+	// before cutoff, across all scopes, and reports how many rows went.
+	DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
 }

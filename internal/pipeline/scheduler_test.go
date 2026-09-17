@@ -219,3 +219,73 @@ func TestScheduler_DuplicateCheckDoesNotLoadStoredSignals(t *testing.T) {
 			spy.unboundedLists)
 	}
 }
+
+// seedSignal persists one signal with an explicit detection time.
+func seedSignal(t *testing.T, repo ports.SignalRepository, scope uuid.UUID, detectedAt time.Time) {
+	t.Helper()
+	if err := repo.Save(context.Background(), domain.Signal{
+		ID:         uuid.New(),
+		ScopeID:    scope,
+		Series:     uuid.New(),
+		Pattern:    domain.PatternTypeTrend,
+		DetectedAt: detectedAt,
+		Window:     domain.TimeWindow{Start: detectedAt.Add(-time.Hour), End: detectedAt},
+		Strength:   0.5,
+		Confidence: 0.5,
+	}); err != nil {
+		t.Fatalf("seed signal: %v", err)
+	}
+}
+
+// Detectors re-derive a signal's window from the observations in front
+// of them, so on a live stream the window slides forward and the
+// duplicate check — which keys on the window — legitimately misses.
+// Every tick therefore appends. Without retention that is a table with
+// no ceiling, on storage that outlives the process: restarting the
+// engine does not reclaim any of it.
+func TestScheduler_SweepDropsSignalsPastRetention(t *testing.T) {
+	mem := memory.New()
+	ctx := context.Background()
+	scope := uuid.New()
+	now := time.Now()
+
+	seedSignal(t, mem.Signals, scope, now.Add(-72*time.Hour))
+	seedSignal(t, mem.Signals, scope, now.Add(-48*time.Hour))
+	seedSignal(t, mem.Signals, scope, now.Add(-time.Hour))
+
+	s := NewScheduler(mem.EntityStates, mem.Signals, detect.NewEngine(config.Default()), time.Second, nil).
+		WithRetention(24 * time.Hour)
+	s.sweep(ctx)
+
+	got, err := mem.Signals.List(ctx, ports.SignalFilter{ScopeID: scope})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("retention sweep kept %d signals, want 1 (the one inside the window)", len(got))
+	}
+	if got[0].DetectedAt.Before(now.Add(-24 * time.Hour)) {
+		t.Fatal("retention sweep kept a signal older than the cutoff")
+	}
+}
+
+// Retention off is the default, so an operator who has not opted in
+// sees exactly the behaviour they had before.
+func TestScheduler_SweepIsNoopWithoutRetention(t *testing.T) {
+	mem := memory.New()
+	ctx := context.Background()
+	scope := uuid.New()
+
+	seedSignal(t, mem.Signals, scope, time.Now().Add(-10000*time.Hour))
+
+	s := NewScheduler(mem.EntityStates, mem.Signals, detect.NewEngine(config.Default()), time.Second, nil)
+	s.sweep(ctx)
+
+	n, err := mem.Signals.Count(ctx, ports.SignalFilter{ScopeID: scope})
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("sweep with retention disabled deleted signals: %d remain, want 1", n)
+	}
+}

@@ -29,7 +29,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
-> **Bookkeeping note.** The entries below were written against
+> **Bookkeeping note.** The older entries in this section — everything
+> from the first `### Changed` down — were written against
 > `[Unreleased]` and never moved when 0.7.0, 0.8.0 and 0.9.0 were tagged;
 > several of them verifiably shipped in those releases (content-addressed
 > `PerceptionID` and the `outlier_cluster` nil-series validation are both
@@ -38,6 +39,43 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 > false history into the file this project calls its stability record.
 > Worth an audit against the tags.
 
+### Fixed
+- **The detection scheduler no longer reads the signals table to ask
+  whether it has seen a signal before.** `alreadyPersisted` fetched every
+  stored signal for the candidate's `(scope, series, pattern)` — with no
+  limit, and on the SQL backends one further query per row to hydrate
+  evidence — in order to compare two timestamps, once per candidate per
+  tick. Nothing prunes that table, so the read had no ceiling: a
+  deployment running 73 series at a 30-second cadence accumulated 24,471
+  rows in 19 hours and was OOM-killed 35 times. `CHRONOS_MAX_SIGNALS`
+  does not help, because it caps what a run *emits*, not what the store
+  holds.
+
+  The scheduler now asks the store to `Count` the full perception
+  identity, which keeps a tick's memory flat however large the store has
+  grown. `SignalFilter` gained a `Window` field to express it, and all
+  three SQL schemas gained `idx_signals_identity` so the check is an
+  indexed probe. A regression test fails if the scheduler ever issues an
+  unbounded `List` again.
+
+### Added
+- **`CHRONOS_SIGNAL_RETENTION`** — deletes signals detected longer ago
+  than the given duration, swept hourly. Defaults to `0` (keep
+  everything), so nothing changes for a deployment that does not opt in.
+
+  The fix above bounds the *memory* a tick costs, not the table. A
+  detector derives its analysis window from the observations in front of
+  it, so on a live stream that window slides forward and the duplicate
+  check legitimately misses — every tick appends a row, and because the
+  store outlives the process, restarting the engine reclaims none of it.
+  Any deployment whose scheduler runs continuously should set this.
+
+  Retention is an optional store capability (`ports.SignalRetainer`)
+  rather than a `SignalRepository` method: the signals table is otherwise
+  append-only, and pruning it is an operator's decision about storage,
+  not a domain operation. All four bundled backends implement it, the
+  notifier decorator forwards it, and a store that cannot prune makes the
+  scheduler log an error on every sweep rather than silently do nothing.
 
 ### Changed
 - **No Homebrew cask.** Chronos is a Go library (optional `cmd/chronos` for

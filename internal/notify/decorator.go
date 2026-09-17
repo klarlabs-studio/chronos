@@ -16,6 +16,7 @@ package notify
 
 import (
 	"context"
+	"time"
 
 	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/felixgeelhaar/chronos/internal/ports"
@@ -73,6 +74,22 @@ func (n *NotifyingSignalRepository) Get(ctx context.Context, id uuid.UUID) (doma
 // Count delegates to the inner repository.
 func (n *NotifyingSignalRepository) Count(ctx context.Context, filter ports.SignalFilter) (int64, error) {
 	return n.inner.Count(ctx, filter)
+}
+
+// DeleteSignalsOlderThan forwards retention to the inner repository when
+// it supports it, and reports ports.ErrNotImplemented when it does not.
+//
+// This wrapper is installed unconditionally on the serve path, so it
+// sits between the scheduler and the real store. A capability it fails
+// to forward is a capability the scheduler cannot see — retention would
+// silently do nothing on exactly the deployments whose store has grown
+// large enough to need it.
+func (n *NotifyingSignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	retainer, ok := n.inner.(ports.SignalRetainer)
+	if !ok {
+		return 0, ports.ErrNotImplemented
+	}
+	return retainer.DeleteSignalsOlderThan(ctx, cutoff)
 }
 
 // Multi composes several Notifiers into one. Failures in any single

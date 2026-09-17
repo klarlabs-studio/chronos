@@ -47,6 +47,12 @@ CREATE INDEX idx_signals_series       ON signals(series_id, detected_at DESC);
 -- scan over everything ever detected for the series.
 CREATE INDEX idx_signals_identity ON signals(scope_id, series_id, pattern, window_start, window_end);
 
+-- Retention deletes across every scope at once, so the leading
+-- scope_id of idx_signals_scope_time puts that index out of reach and
+-- the sweep would degrade into a full scan of the table it exists to
+-- keep small.
+CREATE INDEX idx_signals_detected_at ON signals(detected_at);
+
 CREATE TABLE signal_evidence (
     signal_id TEXT NOT NULL,
     series_id TEXT NOT NULL,

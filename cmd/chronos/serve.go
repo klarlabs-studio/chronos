@@ -159,7 +159,8 @@ func runServe(args []string) error {
 	// observations and writes signals via the notifier-wrapped repo —
 	// which is what makes SSE see anything.
 	if cfg.DetectionInterval > 0 {
-		sched := pipeline.NewScheduler(conn.EntityStates, signals, pipeline.NewEngine(cfg).WithMetrics(metrics), cfg.DetectionInterval, logger)
+		sched := pipeline.NewScheduler(conn.EntityStates, signals, pipeline.NewEngine(cfg).WithMetrics(metrics), cfg.DetectionInterval, logger).
+			WithRetention(cfg.SignalRetention)
 		go func() {
 			if err := sched.Run(rootCtx); err != nil {
 				logger.Error("scheduler exited with error", "err", err)
@@ -184,7 +185,8 @@ func runServe(args []string) error {
 	}()
 
 	logger.Info("listening", "addr", addr, "store", cfg.DBType,
-		"detection_interval", cfg.DetectionInterval, "webhooks", len(cfg.WebhookURLs),
+		"detection_interval", cfg.DetectionInterval, "signal_retention", cfg.SignalRetention,
+		"webhooks", len(cfg.WebhookURLs),
 		"grpc_port", cfg.GRPCPort)
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return NewSystemError(err, "serve: %v", err)

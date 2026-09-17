@@ -50,6 +50,7 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_WEBHOOK_TIMEOUT` | `5s` | both | Per-request HTTP client timeout (Go duration). |
 | `CHRONOS_WEBHOOK_RETRIES` | `1` | both | Best-effort retries on 5xx. No retry on 2xx or 4xx. |
 | `CHRONOS_DETECTION_INTERVAL` | `0` | `serve` | Background detection cadence; `0` disables. Required for SSE to receive signals. |
+| `CHRONOS_SIGNAL_RETENTION` | `0` | `serve` | Delete signals detected longer ago than this; `0` keeps them forever. Set it on any long-running scheduler — see below. |
 | `CHRONOS_VERBOSE` | unset | CLI | When set to any non-empty value, prints the cause chain on errors. |
 
 `serve` flags `--port`, `--host`, and `--grpc-port` override their env counterparts. `compute` accepts `--scope-id` (preferred) or `--coach-id` (legacy alias).
@@ -158,6 +159,14 @@ Body shape is identical to `/v1/signals` responses (see [`wire-contract.md`](wir
 ### Server-Sent Events (SSE)
 
 Available at `GET /v1/signals/stream?scope_id=<uuid>&pattern=<optional>`. Set `CHRONOS_DETECTION_INTERVAL` to a non-zero duration to enable the in-process detection scheduler — without it, `serve` only ingests, so the SSE stream would never produce events.
+
+### Signal retention
+
+A running scheduler appends; it never revises. Each detector derives its analysis window from the observations in front of it, so on a live stream that window slides forward with every tick and the scheduler's duplicate check — which keys on `(scope, series, pattern, window)` — correctly finds no match. The signals table therefore grows for as long as the scheduler runs, and because the store outlives the process, restarting the engine reclaims none of it.
+
+`CHRONOS_SIGNAL_RETENTION` bounds that growth: once an hour the scheduler deletes every signal detected longer ago than the configured duration (evidence rows go with them via `ON DELETE CASCADE`). The default of `0` keeps everything, which is the historical behaviour; **set it on any deployment whose scheduler runs continuously**. A week (`168h`) is a reasonable starting point for a store that exists to feed live consumers.
+
+Retention is a store capability, not a requirement. If the configured backend cannot prune, the scheduler logs an error on every sweep rather than quietly doing nothing.
 
 Each event has the form:
 

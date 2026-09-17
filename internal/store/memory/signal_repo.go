@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/felixgeelhaar/chronos/internal/ports"
@@ -77,6 +78,23 @@ func (r *SignalRepository) Count(_ context.Context, filter ports.SignalFilter) (
 		}
 	}
 	return n, nil
+}
+
+// DeleteSignalsOlderThan removes signals detected before cutoff.
+func (r *SignalRepository) DeleteSignalsOlderThan(_ context.Context, cutoff time.Time) (int64, error) {
+	r.conn.mu.Lock()
+	defer r.conn.mu.Unlock()
+	kept := r.conn.signals[:0]
+	var removed int64
+	for _, sig := range r.conn.signals {
+		if sig.DetectedAt.Before(cutoff) {
+			removed++
+			continue
+		}
+		kept = append(kept, sig)
+	}
+	r.conn.signals = kept
+	return removed, nil
 }
 
 func matches(sig domain.Signal, f ports.SignalFilter) bool {

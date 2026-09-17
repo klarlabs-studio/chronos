@@ -172,3 +172,59 @@ func TestMulti_NilEntriesIgnored(t *testing.T) {
 		t.Fatalf("nil entries should be skipped, but real notifier got %d", len(a.calls))
 	}
 }
+
+// retainingRepo is a fakeRepo that also advertises SignalRetainer.
+type retainingRepo struct {
+	fakeRepo
+	cutoff  time.Time
+	deleted int64
+	called  bool
+}
+
+func (r *retainingRepo) DeleteSignalsOlderThan(_ context.Context, cutoff time.Time) (int64, error) {
+	r.called = true
+	r.cutoff = cutoff
+	return r.deleted, nil
+}
+
+// The serve path installs this wrapper unconditionally, so it sits
+// between the scheduler and the real store. The scheduler discovers
+// retention by type-asserting the repository it was handed — which is
+// the wrapper — so a wrapper that does not forward the capability makes
+// retention a silent no-op on every deployment that has a notifier
+// configured, which is all of them.
+func TestNotifyingSignalRepository_ForwardsRetention(t *testing.T) {
+	inner := &retainingRepo{deleted: 7}
+	repo := WrapSignals(inner, &recordingNotifier{})
+
+	if _, ok := ports.SignalRepository(repo).(ports.SignalRetainer); !ok {
+		t.Fatal("wrapper does not advertise SignalRetainer; the scheduler's type assertion would fail")
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour)
+	n, err := repo.DeleteSignalsOlderThan(context.Background(), cutoff)
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !inner.called {
+		t.Fatal("wrapper did not reach the inner repository")
+	}
+	if !inner.cutoff.Equal(cutoff) {
+		t.Fatalf("cutoff %v forwarded as %v", cutoff, inner.cutoff)
+	}
+	if n != 7 {
+		t.Fatalf("deleted count %d, want 7 (the inner repository's answer)", n)
+	}
+}
+
+// A store that genuinely cannot prune must say so rather than report a
+// successful deletion of zero rows, which reads identically to "nothing
+// was old enough".
+func TestNotifyingSignalRepository_RetentionUnsupportedByInner(t *testing.T) {
+	repo := WrapSignals(&fakeRepo{}, &recordingNotifier{})
+
+	_, err := repo.DeleteSignalsOlderThan(context.Background(), time.Now())
+	if !errors.Is(err, ports.ErrNotImplemented) {
+		t.Fatalf("err = %v, want ports.ErrNotImplemented", err)
+	}
+}

@@ -127,6 +127,18 @@ type Config struct {
 
 	// Notifications — Detection scheduler (serve only)
 	DetectionInterval time.Duration // 0 disables the in-process scheduler
+
+	// SignalRetention bounds how long detected signals are kept; 0
+	// keeps them forever, which is the historical behaviour.
+	//
+	// A running scheduler appends rather than revises: a detector
+	// derives its analysis window from the observations in front of it,
+	// so on a live stream the window slides forward and the duplicate
+	// check — which keys on that window — correctly finds no match.
+	// Every tick is therefore a new row, and the store outlives the
+	// process, so restarting reclaims nothing. Long-lived deployments
+	// should set this.
+	SignalRetention time.Duration
 }
 
 // Default returns sensible defaults.
@@ -192,6 +204,7 @@ func Default() *Config {
 		WebhookRetries: defaultEnvInt("CHRONOS_WEBHOOK_RETRIES", 1),
 
 		DetectionInterval: defaultEnvDuration("CHRONOS_DETECTION_INTERVAL", 0),
+		SignalRetention:   defaultEnvDuration("CHRONOS_SIGNAL_RETENTION", 0),
 	}
 }
 
