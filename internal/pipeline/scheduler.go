@@ -107,24 +107,29 @@ func (s *Scheduler) tick(ctx context.Context) {
 // store. Detectors mint a fresh UUID every Detect call, so without
 // this check the scheduler would append a duplicate row on every tick
 // over unchanged observations. Lookup failures fail open (return
-// false) so a transient List error cannot suppress a real emission.
+// false) so a transient store error cannot suppress a real emission.
+//
+// The whole identity goes into the filter and the store answers with a
+// Count. It is tempting to ask the cheaper-looking question — fetch
+// this series' signals, compare the windows here — but that reads
+// every matching row into the process (and, on the SQL backends, one
+// further query per row to hydrate its evidence) merely to compare two
+// timestamps. Since nothing prunes the signals table, the cost of that
+// read has no ceiling: it ran once per candidate per tick until the
+// process was OOM-killed. Counting keeps a tick's memory flat no
+// matter how large the store has grown.
 func (s *Scheduler) alreadyPersisted(ctx context.Context, sig domain.Signal) bool {
 	pat := sig.Pattern
 	series := sig.Series
-	existing, err := s.signals.List(ctx, ports.SignalFilter{
+	window := sig.Window
+	n, err := s.signals.Count(ctx, ports.SignalFilter{
 		ScopeID: sig.ScopeID,
 		Pattern: &pat,
 		Series:  &series,
-		// Limit 0 = unlimited. Correlation is O(N²) in series count;
-		// a capped lookup can miss a matching window and re-append.
+		Window:  &window,
 	})
 	if err != nil {
 		return false
 	}
-	for _, e := range existing {
-		if e.Window.Start.Equal(sig.Window.Start) && e.Window.End.Equal(sig.Window.End) {
-			return true
-		}
-	}
-	return false
+	return n > 0
 }

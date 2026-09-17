@@ -110,5 +110,9 @@ func matches(sig domain.Signal, f ports.SignalFilter) bool {
 	if f.MinConfidence != nil && sig.Confidence < *f.MinConfidence {
 		return false
 	}
+	if f.Window != nil &&
+		(!sig.Window.Start.Equal(f.Window.Start) || !sig.Window.End.Equal(f.Window.End)) {
+		return false
+	}
 	return true
 }

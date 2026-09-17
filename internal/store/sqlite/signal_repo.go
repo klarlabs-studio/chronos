@@ -222,6 +222,10 @@ func buildWhere(f ports.SignalFilter) (string, []any) {
 		clauses = append(clauses, "confidence >= ?")
 		args = append(args, *f.MinConfidence)
 	}
+	if f.Window != nil {
+		clauses = append(clauses, "window_start = ?", "window_end = ?")
+		args = append(args, formatTime(f.Window.Start), formatTime(f.Window.End))
+	}
 	if len(clauses) == 0 {
 		return "", args
 	}

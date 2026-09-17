@@ -8,6 +8,7 @@ import (
 	"github.com/felixgeelhaar/chronos"
 	"github.com/felixgeelhaar/chronos/internal/config"
 	"github.com/felixgeelhaar/chronos/internal/detect"
+	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/felixgeelhaar/chronos/internal/ports"
 	"github.com/felixgeelhaar/chronos/internal/store/memory"
 	"github.com/google/uuid"
@@ -143,4 +144,78 @@ func TestScheduler_TickIsResilientToPerScopeFailure(t *testing.T) {
 	s := NewScheduler(mem.EntityStates, mem.Signals, detect.NewEngine(cfg), time.Second, nil)
 	// tick must not panic.
 	s.tick(ctx)
+}
+
+// countingSignals wraps a SignalRepository and records how the
+// scheduler interrogates it.
+type countingSignals struct {
+	inner ports.SignalRepository
+
+	unboundedLists int // List calls with no Limit — the leak signature
+	lists          int
+	counts         int
+}
+
+func (c *countingSignals) Save(ctx context.Context, sig domain.Signal) error {
+	return c.inner.Save(ctx, sig)
+}
+
+func (c *countingSignals) List(ctx context.Context, f ports.SignalFilter) ([]domain.Signal, error) {
+	c.lists++
+	if f.Limit == 0 {
+		c.unboundedLists++
+	}
+	return c.inner.List(ctx, f)
+}
+
+func (c *countingSignals) Get(ctx context.Context, id uuid.UUID) (domain.Signal, error) {
+	return c.inner.Get(ctx, id)
+}
+
+func (c *countingSignals) Count(ctx context.Context, f ports.SignalFilter) (int64, error) {
+	c.counts++
+	return c.inner.Count(ctx, f)
+}
+
+// The duplicate check runs once per candidate signal, on every tick,
+// forever. If it answers "have I stored this before?" by loading the
+// matching signals into memory, the cost of a tick grows with the size
+// of the store — and because nothing prunes the store, that growth has
+// no ceiling. In production this read the whole matching set (plus a
+// per-row evidence query) every 30 seconds until the process was
+// OOM-killed.
+//
+// The check must therefore ask the store a bounded question. This test
+// pins that: no unbounded List may be issued while ticking.
+func TestScheduler_DuplicateCheckDoesNotLoadStoredSignals(t *testing.T) {
+	cfg := config.Default()
+	mem := memory.New()
+	ctx := context.Background()
+
+	scope := uuid.New()
+	entity := uuid.New()
+	now := time.Now()
+	for i, o := range []float64{1, 2, 3, 4, 5, 6} {
+		if err := mem.EntityStates.Ingest(ctx, "test", chronos.EntityState{
+			ID:        uuid.New(),
+			EntityID:  entity,
+			ScopeID:   scope,
+			Timestamp: now.Add(time.Duration(i) * time.Minute),
+			Features:  []float64{float64(i), o},
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	spy := &countingSignals{inner: mem.Signals}
+	s := NewScheduler(mem.EntityStates, spy, detect.NewEngine(cfg), time.Second, nil)
+
+	s.tick(ctx)
+	s.tick(ctx)
+
+	if spy.unboundedLists > 0 {
+		t.Fatalf("scheduler issued %d unbounded List call(s) while ticking; "+
+			"the duplicate check must not materialise the stored signal set",
+			spy.unboundedLists)
+	}
 }

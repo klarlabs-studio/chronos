@@ -88,6 +88,15 @@ type SignalFilter struct {
 	// MinConfidence, when set, drops signals below the threshold.
 	MinConfidence *float64
 
+	// Window, when set, restricts results to signals whose analysis
+	// window matches exactly on both bounds. Together with ScopeID,
+	// Series and Pattern this is a signal's perception identity, so a
+	// filter carrying all four asks "have I detected this already?" —
+	// a question a store can answer with Count instead of by returning
+	// rows. Both bounds move together on purpose: half an identity is
+	// not an identity, so a partial window is not expressible.
+	Window *domain.TimeWindow
+
 	// Limit caps the number of returned signals; 0 means no limit.
 	Limit int
 }
