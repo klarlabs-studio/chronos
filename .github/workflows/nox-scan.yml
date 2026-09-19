@@ -26,7 +26,6 @@ on:
   # August. The scan is ~30s; that is cheaper than the trap.
   pull_request:
     branches: [main]
-      - 'LICENSE'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
