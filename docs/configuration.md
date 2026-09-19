@@ -50,7 +50,7 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_WEBHOOK_TIMEOUT` | `5s` | both | Per-request HTTP client timeout (Go duration). |
 | `CHRONOS_WEBHOOK_RETRIES` | `1` | both | Best-effort retries on 5xx. No retry on 2xx or 4xx. |
 | `CHRONOS_DETECTION_INTERVAL` | `0` | `serve` | Background detection cadence; `0` disables. Required for SSE to receive signals. |
-| `CHRONOS_DETECTION_LOOKBACK` | `168h` | `serve` | How much history each detection tick loads per scope. Bounds a tick's memory; see below. |
+| `CHRONOS_DETECTION_LOOKBACK` | `24h` | `serve` | How much history each detection tick loads per scope. Bounds a tick's memory; see below. |
 | `CHRONOS_SIGNAL_RETENTION` | `0` | `serve` | Delete signals detected longer ago than this; `0` keeps them forever. Set it on any long-running scheduler — see below. |
 | `CHRONOS_VERBOSE` | unset | CLI | When set to any non-empty value, prints the cause chain on errors. |
 
@@ -178,7 +178,17 @@ Two properties of that failure are worth knowing, because both mislead:
 - **It tracks table size, not ingest rate.** Raising the memory limit lengthens the cycle instead of stopping it, and restarting reclaims nothing because the store outlives the process.
 - **It is not any detector.** The load happens before `Detect` is called, so disabling detectors — including the only `O(N²)` one — does not move it.
 
-Detectors only ever consult their own analysis window, so history older than the lookback was loaded and then ignored. Set it to the longest window any enabled detector needs: seasonality needs more than one cycle of the rhythm it is looking for, which is what the `168h` default is sized for. Shorter is cheaper, and the cost is linear in the window.
+Detectors only ever consult their own analysis window, so history older than the lookback was loaded and then ignored.
+
+**Sizing it.** The cost is roughly linear in the window, and the engine cannot compute it for you — it depends on `window × series × observation rate × row size`, and it knows none of those at config time. Measure instead: on a 73-series fleet at a five-minute cadence, a tick cost about **10.7 MB per hour of history**, so
+
+| window | that fleet |
+|---|---|
+| `168h` | ~1.8 GB — OOM at a 2 GiB limit |
+| `24h` (default) | ~257 MiB |
+| `6h` | ~64 MiB |
+
+The default is deliberately conservative. It shipped once at `168h`, sized for weekly seasonality, and OOM-killed the deployment it was written for on the first tick. **Weekly seasonality does not resolve inside 24h** — if you need it, raise this having done the arithmetic above, rather than assuming the default already accounts for your data. Set it to the longest window any enabled detector needs: seasonality needs more than one cycle of the rhythm it is looking for, which is what the `168h` default is sized for. Shorter is cheaper, and the cost is linear in the window.
 
 Retention is a store capability, not a requirement. If the configured backend cannot prune, the scheduler logs an error on every sweep rather than quietly doing nothing.
 

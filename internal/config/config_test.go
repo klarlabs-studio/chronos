@@ -206,3 +206,25 @@ func TestEnvHelpers(t *testing.T) {
 		}
 	})
 }
+
+// The lookback default is load-bearing: it is the only thing standing
+// between a fresh deployment and the unbounded history read that
+// OOM-killed engines before 0.12.0. It shipped once at 7 days, which
+// allocated 1804Mi against a 2Gi limit on a 73-series fleet. Pin it so
+// a future widening is a deliberate edit with a failing test, not a
+// one-character drift.
+func TestDefault_DetectionLookbackIsBoundedAndSane(t *testing.T) {
+	c := Default()
+	if c.DetectionLookback <= 0 {
+		t.Fatalf("DetectionLookback = %v; a non-positive default is an unbounded read", c.DetectionLookback)
+	}
+	if want := 24 * time.Hour; c.DetectionLookback != want {
+		t.Errorf("DetectionLookback = %v, want %v", c.DetectionLookback, want)
+	}
+	// Enough history for the hungriest detector at a five-minute
+	// cadence: CHRONOS_SEASONALITY_MIN_POINTS defaults to well under
+	// the 288 points a day of five-minute windows provides.
+	if pts := int(c.DetectionLookback / (5 * time.Minute)); pts < 48 {
+		t.Errorf("default lookback yields only %d points at a 5m cadence; too few for the detectors", pts)
+	}
+}
