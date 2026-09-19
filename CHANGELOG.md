@@ -25,6 +25,13 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   indexed probe. A regression test fails if the scheduler ever issues an
   unbounded `List` again.
 
+- **`go.opentelemetry.io/otel/sdk` to v1.45.0**, clearing
+  GHSA-8wmf-6v46-5gfg / CVE-2026-81870 (exporter config logging may leak
+  endpoint URLs into info logs). Low severity, and nox could not establish
+  whether the affected symbol is reached — it resolved `affected_version`
+  and stopped at `symbol_used` — so this is taken on version alone. The
+  bump carries `otel`, `otel/metric` and `otel/trace` to 1.45.0 with it.
+
 ### Added
 - **`CHRONOS_SIGNAL_RETENTION`** — deletes signals detected longer ago
   than the given duration, swept hourly. Defaults to `0` (keep
