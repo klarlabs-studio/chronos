@@ -76,6 +76,21 @@ func (r *EntityStateRepository) ListByScope(ctx context.Context, scopeID uuid.UU
 	return decodeEntityStates(rows)
 }
 
+// ListByScopeSince returns the scope's states observed at or after
+// cutoff, most recent first. Cutoff is encoded with formatTime, the
+// same encoding used on write and by DeleteOlderThan, so the TEXT
+// comparison orders correctly.
+func (r *EntityStateRepository) ListByScopeSince(ctx context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error) {
+	rows, err := r.conn.q.GetEntityStatesByScopeSince(ctx, sqlcgen.GetEntityStatesByScopeSinceParams{
+		ScopeID:   scopeID.String(),
+		Timestamp: formatTime(cutoff),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("entity_state list by scope since: %w", err)
+	}
+	return decodeEntityStates(rows)
+}
+
 // ListByEntity returns all observations of an entity, most recent first.
 func (r *EntityStateRepository) ListByEntity(ctx context.Context, entityID uuid.UUID) ([]chronos.EntityState, error) {
 	rows, err := r.conn.q.GetEntityStatesByEntity(ctx, entityID.String())

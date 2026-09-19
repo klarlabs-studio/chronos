@@ -113,6 +113,50 @@ func (q *Queries) GetEntityStatesByScope(ctx context.Context, scopeID string) ([
 	return items, nil
 }
 
+const getEntityStatesByScopeSince = `-- name: GetEntityStatesByScopeSince :many
+SELECT id, entity_id, scope_id, timestamp, features, labels, meta, adapter, created_at FROM entity_states
+WHERE scope_id = ? AND timestamp >= ?
+ORDER BY timestamp DESC
+`
+
+type GetEntityStatesByScopeSinceParams struct {
+	ScopeID   string `json:"scope_id"`
+	Timestamp string `json:"timestamp"`
+}
+
+func (q *Queries) GetEntityStatesByScopeSince(ctx context.Context, arg GetEntityStatesByScopeSinceParams) ([]EntityState, error) {
+	rows, err := q.db.QueryContext(ctx, getEntityStatesByScopeSince, arg.ScopeID, arg.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EntityState{}
+	for rows.Next() {
+		var i EntityState
+		if err := rows.Scan(
+			&i.ID,
+			&i.EntityID,
+			&i.ScopeID,
+			&i.Timestamp,
+			&i.Features,
+			&i.Labels,
+			&i.Meta,
+			&i.Adapter,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSignalByID = `-- name: GetSignalByID :one
 SELECT id, scope_id, series_id, pattern, detected_at, window_start, window_end, strength, confidence, metrics, explanation, confidence_class FROM signals WHERE id = ?
 `

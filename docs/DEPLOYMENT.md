@@ -69,6 +69,7 @@ CHRONOS_DETECTION_INTERVAL=30s
 # Bound the signals table. A continuously-running scheduler appends on
 # every tick and nothing else prunes, so leaving this at 0 means the
 # store grows for as long as the process runs — and survives its restart.
+CHRONOS_DETECTION_LOOKBACK=168h
 CHRONOS_SIGNAL_RETENTION=168h
 
 # Auth (HTTP + gRPC share this token)

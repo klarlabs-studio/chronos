@@ -167,6 +167,21 @@ func (r *EntityStateRepository) ListByScope(ctx context.Context, scopeID uuid.UU
 	return scanEntityStates(rows)
 }
 
+// ListByScopeSince returns the scope's states observed at or after
+// cutoff, most recent first.
+func (r *EntityStateRepository) ListByScopeSince(ctx context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error) {
+	rows, err := r.conn.DB.QueryContext(ctx, `
+		SELECT id, entity_id, scope_id, timestamp, features, labels, meta
+		FROM entity_states
+		WHERE scope_id = $1 AND timestamp >= $2
+		ORDER BY timestamp DESC
+	`, scopeID, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("entity_state list by scope since: %w", err)
+	}
+	return scanEntityStates(rows)
+}
+
 // ListByEntity returns all observations of an entity, most recent first.
 func (r *EntityStateRepository) ListByEntity(ctx context.Context, entityID uuid.UUID) ([]chronos.EntityState, error) {
 	rows, err := r.conn.DB.QueryContext(ctx, `

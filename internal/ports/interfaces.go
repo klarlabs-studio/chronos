@@ -47,6 +47,22 @@ type EntityStateRepository interface {
 	// first. Detectors load history through this method.
 	ListByScope(ctx context.Context, scopeID uuid.UUID) ([]chronos.EntityState, error)
 
+	// ListByScopeSince returns the scope's states observed at or after
+	// cutoff, most recent first. This is the bounded form of
+	// ListByScope and the one long-running callers must use.
+	//
+	// ListByScope has no limit and no window: it materialises every
+	// observation ever recorded for the scope. Nothing prunes
+	// entity_states -- DeleteOlderThan exists on this interface and had
+	// no caller anywhere in the tree -- so on a live stream that result
+	// grows without bound, and a detection loop calling it on a timer
+	// allocates the whole table every tick. Measured on a 73-series
+	// deployment: a flat 2Mi baseline, then ~1.9GB inside a single
+	// 30-second tick, then OOM, repeating. The allocation is here,
+	// before any detector runs, which is why disabling detectors did
+	// not change it.
+	ListByScopeSince(ctx context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error)
+
 	// ListByEntity returns all observations of a single entity, most
 	// recent first.
 	ListByEntity(ctx context.Context, entityID uuid.UUID) ([]chronos.EntityState, error)

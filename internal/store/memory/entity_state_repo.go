@@ -50,6 +50,23 @@ func (r *EntityStateRepository) ListByScope(_ context.Context, scopeID uuid.UUID
 	return out, nil
 }
 
+// ListByScopeSince returns a defensive copy of the scope's states
+// observed at or after cutoff, most recent first.
+func (r *EntityStateRepository) ListByScopeSince(_ context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error) {
+	r.conn.mu.RLock()
+	defer r.conn.mu.RUnlock()
+	stored := r.conn.entityStates[scopeID]
+	out := make([]chronos.EntityState, 0, len(stored))
+	for _, s := range stored {
+		if s.state.Timestamp.Before(cutoff) {
+			continue
+		}
+		out = append(out, s.state)
+	}
+	sortByTimestampDesc(out)
+	return out, nil
+}
+
 // ListByEntity scans all scopes for observations of entityID, most
 // recent first.
 func (r *EntityStateRepository) ListByEntity(_ context.Context, entityID uuid.UUID) ([]chronos.EntityState, error) {

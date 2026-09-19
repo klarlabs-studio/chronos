@@ -32,6 +32,10 @@ func (f *fakeUpstream) Save(_ context.Context, _ string, states []chronos.Entity
 	return nil
 }
 
+func (f *fakeUpstream) ListByScopeSince(_ context.Context, _ uuid.UUID, _ time.Time) ([]chronos.EntityState, error) {
+	return nil, nil
+}
+
 func (f *fakeUpstream) ListByScope(_ context.Context, _ uuid.UUID) ([]chronos.EntityState, error) {
 	return nil, nil
 }

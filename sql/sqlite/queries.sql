@@ -12,6 +12,11 @@ SELECT * FROM entity_states
 WHERE scope_id = ?
 ORDER BY timestamp DESC;
 
+-- name: GetEntityStatesByScopeSince :many
+SELECT * FROM entity_states
+WHERE scope_id = ? AND timestamp >= ?
+ORDER BY timestamp DESC;
+
 -- name: GetEntityStatesByEntity :many
 SELECT * FROM entity_states
 WHERE entity_id = ?

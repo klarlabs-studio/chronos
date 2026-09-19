@@ -162,6 +162,11 @@ func (r *Repo) ListByScope(ctx context.Context, scopeID uuid.UUID) ([]chronos.En
 	return r.upstream.ListByScope(ctx, scopeID)
 }
 
+// ListByScopeSince passes through to upstream.
+func (r *Repo) ListByScopeSince(ctx context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error) {
+	return r.upstream.ListByScopeSince(ctx, scopeID, cutoff)
+}
+
 // ListByEntity passes through to upstream.
 func (r *Repo) ListByEntity(ctx context.Context, entityID uuid.UUID) ([]chronos.EntityState, error) {
 	return r.upstream.ListByEntity(ctx, entityID)
