@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/felixgeelhaar/chronos/internal/ports"
@@ -138,6 +139,21 @@ func (r *SignalRepository) Count(ctx context.Context, filter ports.SignalFilter)
 	return n, nil
 }
 
+// DeleteSignalsOlderThan removes signals detected before cutoff.
+// signal_evidence goes with them via ON DELETE CASCADE.
+func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.conn.DB.ExecContext(ctx,
+		`DELETE FROM signals WHERE detected_at < ?`, formatTime(cutoff))
+	if err != nil {
+		return 0, fmt.Errorf("signal retention: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("signal retention: rows affected: %w", err)
+	}
+	return n, nil
+}
+
 func (r *SignalRepository) loadEvidence(ctx context.Context, id uuid.UUID) ([]domain.Evidence, error) {
 	rows, err := r.conn.q.GetSignalEvidence(ctx, id.String())
 	if err != nil {
@@ -221,6 +237,10 @@ func buildWhere(f ports.SignalFilter) (string, []any) {
 	if f.MinConfidence != nil {
 		clauses = append(clauses, "confidence >= ?")
 		args = append(args, *f.MinConfidence)
+	}
+	if f.Window != nil {
+		clauses = append(clauses, "window_start = ?", "window_end = ?")
+		args = append(args, formatTime(f.Window.Start), formatTime(f.Window.End))
 	}
 	if len(clauses) == 0 {
 		return "", args

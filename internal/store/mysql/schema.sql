@@ -41,7 +41,18 @@ CREATE TABLE IF NOT EXISTS signals (
     confidence_class VARCHAR(32) NOT NULL DEFAULT '',
     INDEX idx_signals_scope_time     (scope_id, detected_at),
     INDEX idx_signals_scope_pattern  (scope_id, pattern, detected_at),
-    INDEX idx_signals_series         (series_id, detected_at)
+    INDEX idx_signals_series         (series_id, detected_at),
+    -- The scheduler's duplicate check, once per candidate signal per
+    -- tick, forever. Its predicate is a signal's full perception
+    -- identity, so the index covers all five columns and the lookup is
+    -- a probe rather than a scan over everything ever detected for the
+    -- series.
+    INDEX idx_signals_identity       (scope_id, series_id, pattern, window_start, window_end),
+    -- Retention deletes across every scope at once, so the leading
+    -- scope_id of idx_signals_scope_time puts that index out of reach
+    -- and the sweep would degrade into a full scan of the table it
+    -- exists to keep small.
+    INDEX idx_signals_detected_at    (detected_at)
 );
 
 -- Existing deployments created the table before explanation /
@@ -49,6 +60,8 @@ CREATE TABLE IF NOT EXISTS signals (
 -- CREATE TABLE already included them (fresh Open).
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS explanation JSON NOT NULL DEFAULT ('{}');
 ALTER TABLE signals ADD COLUMN IF NOT EXISTS confidence_class VARCHAR(32) NOT NULL DEFAULT '';
+ALTER TABLE signals ADD INDEX IF NOT EXISTS idx_signals_identity (scope_id, series_id, pattern, window_start, window_end);
+ALTER TABLE signals ADD INDEX IF NOT EXISTS idx_signals_detected_at (detected_at);
 
 CREATE TABLE IF NOT EXISTS signal_evidence (
     signal_id  CHAR(36)     NOT NULL,

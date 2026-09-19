@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -25,11 +26,12 @@ import (
 // signal with the same (scope, series, pattern, window) already
 // exists, so unchanged data does not append duplicate rows.
 type Scheduler struct {
-	states   ports.EntityStateRepository
-	signals  ports.SignalRepository
-	engine   *detect.Engine
-	interval time.Duration
-	logger   *slog.Logger
+	states    ports.EntityStateRepository
+	signals   ports.SignalRepository
+	engine    *detect.Engine
+	interval  time.Duration
+	retention time.Duration
+	logger    *slog.Logger
 }
 
 // NewScheduler builds a scheduler. interval == 0 produces a scheduler
@@ -49,6 +51,22 @@ func NewScheduler(states ports.EntityStateRepository, signals ports.SignalReposi
 	}
 }
 
+// WithRetention enables periodic deletion of signals older than d, and
+// returns the scheduler for chaining. Zero (the default) disables the
+// sweep entirely, so a deployment that has not opted in behaves exactly
+// as it did before retention existed.
+//
+// This is a setter rather than a NewScheduler parameter because the
+// constructor already takes a time.Duration: two adjacent durations are
+// two arguments a caller can transpose without the compiler noticing,
+// and transposing these two turns a 30-second detection cadence into a
+// 30-second retention window that deletes almost the entire table on
+// its first pass.
+func (s *Scheduler) WithRetention(d time.Duration) *Scheduler {
+	s.retention = d
+	return s
+}
+
 // Run blocks until ctx is cancelled, ticking detection every
 // interval. interval <= 0 is treated as disabled and Run returns
 // immediately. Each tick is bounded by ctx — if a scope load takes
@@ -61,7 +79,15 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
 
-	s.logger.Info("detection scheduler started", "interval", s.interval)
+	// Retention runs on its own, far slower clock. Tying it to the
+	// detection interval would issue a table-wide DELETE every few
+	// seconds to reclaim the handful of rows that aged out since the
+	// last one.
+	sweeps := time.NewTicker(retentionSweepInterval)
+	defer sweeps.Stop()
+
+	s.logger.Info("detection scheduler started", "interval", s.interval, "signal_retention", s.retention)
+	s.sweep(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -69,7 +95,48 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 			s.tick(ctx)
+		case <-sweeps.C:
+			s.sweep(ctx)
 		}
+	}
+}
+
+// retentionSweepInterval is how often Run prunes the signals table when
+// retention is configured.
+const retentionSweepInterval = time.Hour
+
+// sweep deletes signals detected longer ago than the configured
+// retention, and does nothing at all when retention is disabled.
+//
+// A store that cannot prune says so loudly. Retention is an operator
+// setting whose whole effect is invisible — nobody watches rows fail to
+// disappear — so a backend that does not implement SignalRetainer, or a
+// decorator that forgets to forward it, would otherwise leave an
+// operator believing their setting took effect while the table grew
+// exactly as before.
+func (s *Scheduler) sweep(ctx context.Context) {
+	if s.retention <= 0 {
+		return
+	}
+	retainer, ok := s.signals.(ports.SignalRetainer)
+	if !ok {
+		s.logger.Error("scheduler: signal retention configured but the store does not support it; signals will not be pruned",
+			"retention", s.retention)
+		return
+	}
+	cutoff := time.Now().Add(-s.retention)
+	n, err := retainer.DeleteSignalsOlderThan(ctx, cutoff)
+	switch {
+	case errors.Is(err, ports.ErrNotImplemented):
+		s.logger.Error("scheduler: signal retention configured but the store does not support it; signals will not be pruned",
+			"retention", s.retention)
+		return
+	case err != nil:
+		s.logger.Error("scheduler: signal retention sweep failed", "cutoff", cutoff, "err", err)
+		return
+	}
+	if n > 0 {
+		s.logger.Info("scheduler: pruned signals past retention", "deleted", n, "cutoff", cutoff)
 	}
 }
 
@@ -107,24 +174,29 @@ func (s *Scheduler) tick(ctx context.Context) {
 // store. Detectors mint a fresh UUID every Detect call, so without
 // this check the scheduler would append a duplicate row on every tick
 // over unchanged observations. Lookup failures fail open (return
-// false) so a transient List error cannot suppress a real emission.
+// false) so a transient store error cannot suppress a real emission.
+//
+// The whole identity goes into the filter and the store answers with a
+// Count. It is tempting to ask the cheaper-looking question — fetch
+// this series' signals, compare the windows here — but that reads
+// every matching row into the process (and, on the SQL backends, one
+// further query per row to hydrate its evidence) merely to compare two
+// timestamps. Since nothing prunes the signals table, the cost of that
+// read has no ceiling: it ran once per candidate per tick until the
+// process was OOM-killed. Counting keeps a tick's memory flat no
+// matter how large the store has grown.
 func (s *Scheduler) alreadyPersisted(ctx context.Context, sig domain.Signal) bool {
 	pat := sig.Pattern
 	series := sig.Series
-	existing, err := s.signals.List(ctx, ports.SignalFilter{
+	window := sig.Window
+	n, err := s.signals.Count(ctx, ports.SignalFilter{
 		ScopeID: sig.ScopeID,
 		Pattern: &pat,
 		Series:  &series,
-		// Limit 0 = unlimited. Correlation is O(N²) in series count;
-		// a capped lookup can miss a matching window and re-append.
+		Window:  &window,
 	})
 	if err != nil {
 		return false
 	}
-	for _, e := range existing {
-		if e.Window.Start.Equal(sig.Window.Start) && e.Window.End.Equal(sig.Window.End) {
-			return true
-		}
-	}
-	return false
+	return n > 0
 }

@@ -130,6 +130,21 @@ func (r *SignalRepository) Count(ctx context.Context, filter ports.SignalFilter)
 	return n, nil
 }
 
+// DeleteSignalsOlderThan removes signals detected before cutoff.
+// signal_evidence goes with them via ON DELETE CASCADE.
+func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.conn.DB.ExecContext(ctx,
+		`DELETE FROM signals WHERE detected_at < ?`, cutoff.UTC())
+	if err != nil {
+		return 0, fmt.Errorf("signal retention: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("signal retention: rows affected: %w", err)
+	}
+	return n, nil
+}
+
 func (r *SignalRepository) loadEvidence(ctx context.Context, id uuid.UUID) ([]domain.Evidence, error) {
 	rows, err := r.conn.DB.QueryContext(ctx, `
 		SELECT series_id, time, kind, score, metrics
@@ -212,6 +227,10 @@ func buildWhere(f ports.SignalFilter) (string, []any) {
 	}
 	if f.MinConfidence != nil {
 		add("confidence >=", *f.MinConfidence)
+	}
+	if f.Window != nil {
+		add("window_start =", f.Window.Start.UTC())
+		add("window_end =", f.Window.End.UTC())
 	}
 	if len(clauses) == 0 {
 		return "", args
