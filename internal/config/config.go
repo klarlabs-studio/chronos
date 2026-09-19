@@ -151,14 +151,27 @@ type Config struct {
 // defaultDetectionLookback bounds a detection tick's history load when
 // CHRONOS_DETECTION_LOOKBACK is unset.
 //
-// Seven days, not "everything". The previous behaviour was unbounded
-// and is the defect this replaces, so defaulting to unbounded would
-// leave every deployment on the broken path until it opted out. Seven
-// days is chosen over something tighter because seasonality needs more
-// than one cycle of a daily or weekly rhythm to distinguish it from a
-// trend, and that is the detector with the longest memory. Deployments
-// that need less should set it lower; the cost is linear in the window.
-const defaultDetectionLookback = 7 * 24 * time.Hour
+// 24 hours, measured rather than reasoned. This shipped as 7 days in
+// 0.12.0, chosen because seasonality needs more than one cycle of a
+// daily or weekly rhythm to tell it from a trend. That is the right
+// consideration for detection quality and the wrong one for a default:
+// the deployment it was written for OOM-killed on it immediately, at
+// 1804Mi against a 2Gi limit, because a week of 73 series at a
+// five-minute cadence is ~1.8GB once decoded into []EntityState.
+//
+// The cost is roughly linear in the window -- about 10.7MB per hour of
+// history for that fleet -- so the arithmetic an operator needs is
+// theirs, not ours: window x series x observation rate x row size. The
+// engine knows none of those at config time, so the default must fail
+// safe and the documentation must carry the sizing, not just the knob.
+//
+// 24h is 288 points at a five-minute cadence against a largest detector
+// requirement of 24 (CHRONOS_SEASONALITY_MIN_POINTS) -- twelve times the
+// floor, and enough for a daily rhythm. Weekly seasonality does not
+// resolve inside it. A deployment that needs weekly rhythms should raise
+// this deliberately, having done the arithmetic above, rather than
+// inherit a default that assumes its data is small.
+const defaultDetectionLookback = 24 * time.Hour
 
 // Default returns sensible defaults.
 func Default() *Config {

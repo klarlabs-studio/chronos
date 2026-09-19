@@ -4,6 +4,34 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [0.13.0] - 2026-09-19
+
+### Changed
+- **`CHRONOS_DETECTION_LOOKBACK` now defaults to `24h`, not `168h`.**
+
+  The 0.12.0 default was sized for seasonality — the detector with the
+  longest memory, which needs more than one cycle of a daily or weekly
+  rhythm to tell it from a trend. That is the right consideration for
+  detection quality and the wrong one for a default. The deployment it
+  was written for OOM-killed on it immediately: 1804Mi against a 2Gi
+  limit, because a week of 73 series at a five-minute cadence is ~1.8GB
+  once decoded into `[]EntityState`. The bound was working — the startup
+  line reported `detection_lookback=168h0m0s` — the value was simply too
+  large. It is the same failure as the bug 0.12.0 fixed, one step
+  smaller: that code loaded everything, this default loaded more than
+  fits.
+
+  `24h` is 288 points at a five-minute cadence against a largest
+  detector requirement of 24 (`CHRONOS_SEASONALITY_MIN_POINTS`) —
+  twelve times the floor, and enough for a daily rhythm.
+
+  **Weekly seasonality does not resolve inside a 24h window.** A
+  deployment that needs it should raise the lookback deliberately.
+  `docs/configuration.md` now carries the sizing arithmetic (~10.7MB per
+  hour of history on that fleet) so the number can be computed rather
+  than inherited, and a test pins the default so widening it is a
+  deliberate edit against a failing assertion.
+
 ## [0.12.0] - 2026-09-19
 
 ### Fixed

@@ -87,7 +87,7 @@ func (s *Scheduler) WithLookback(d time.Duration) *Scheduler {
 // It mirrors config.defaultDetectionLookback, which is the
 // operator-facing default on the serve path; this one is the
 // last-resort floor.
-const defaultLookback = 7 * 24 * time.Hour
+const defaultLookback = 24 * time.Hour
 
 // Run blocks until ctx is cancelled, ticking detection every
 // interval. interval <= 0 is treated as disabled and Run returns
