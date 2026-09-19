@@ -20,7 +20,7 @@ type Config struct {
 	// alias so existing operator configurations keep working through
 	// the cutover; if DBDSN is empty at startup, the runtime
 	// translates the legacy pair into a DSN form.
-	DBDSN  string // e.g. sqlite:///chronos.db, postgres://user:pw@host/db?namespace=chronos
+	DBDSN  string // e.g. sqlite:///chronos.db, postgres://<user>:<password>@host/db?namespace=chronos
 	DBType string // legacy: sqlite, postgres, memory
 
 	// DetectionLookback bounds how much history each detection tick
