@@ -18,12 +18,14 @@ on:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
+  # No paths-ignore on pull_request. This workflow supplies the
+  # REQUIRED check "Security (nox)", and a required check that is
+  # skipped never reports -- GitHub leaves the PR "blocked" forever with
+  # every other check green. A docs-only or CHANGELOG-only PR could not
+  # be merged at all, which is the likeliest reason #61 sat open from
+  # August. The scan is ~30s; that is cheaper than the trap.
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
