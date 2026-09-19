@@ -139,15 +139,33 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
-> **Bookkeeping note.** The older entries in this section — everything
-> from the first `### Changed` down — were written against
-> `[Unreleased]` and never moved when 0.7.0, 0.8.0 and 0.9.0 were tagged;
-> several of them verifiably shipped in those releases (content-addressed
-> `PerceptionID` and the `outlier_cluster` nil-series validation are both
-> present in the v0.9.0 tree). They are left in place rather than
-> reassigned, because guessing which release each landed in would put
-> false history into the file this project calls its stability record.
-> Worth an audit against the tags.
+> **Audit note (2026-09-19).** The bookkeeping gap flagged in #67 is now
+> resolved against the tags rather than by guesswork. Every entry below the
+> old note was probed against the v0.5.0–v0.10.0 trees for the artefact it
+> describes; sixteen first appear in the v0.9.0 tree and have been moved to
+> a dated `[0.9.0]` section. What remains here genuinely does not belong to
+> a later release: both entries describe code already present at v0.5.0, the
+> earliest tag still in this file, so they shipped at or before 0.5.0 and
+> cannot be placed more precisely from the tags alone. They are left rather
+> than reassigned, for the reason the original note gave — a wrong date is
+> worse than an acknowledged gap in the file this project calls its
+> stability record.
+
+### Changed
+- **MySQL backend** stores `explanation` and `confidence_class` and honours
+  `SignalFilter.ScopeIDs`, matching sqlite/postgres/memory.
+- **Detection scheduler** skips a candidate when a signal with the same
+  `(scope, series, pattern, window)` already exists, so a second tick over
+  unchanged observations does not append duplicate rows (and does not
+  re-notify). A later tick that grows `window.End` (new points) still emits.
+  SQLite and Postgres now replace evidence on ID upsert (MySQL already did).
+- Agent and user docs (README, architecture, configuration, CLAUDE, AGENTS)
+  list all eleven detectors, the MySQL/libSQL backends, and the HTTP auth /
+  extra `/v1` routes that were already in the binary.
+
+
+
+## [0.9.0] - 2026-08-17
 
 ### Changed
 - **No Homebrew cask.** Chronos is a Go library (optional `cmd/chronos` for
@@ -159,6 +177,7 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   (`permission_denied: The requested installation does not exist`) because
   the workflow token belongs to `klarlabs-studio`. The Go module path is
   unchanged.
+
 
 ### Added
 - **`chronos health` subcommand** — probes `GET /health` on
@@ -185,6 +204,7 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   `chronos_detector_signals_total`, `chronos_detector_skips_total`,
   `chronos_signals_truncated_total{pattern}`.
 
+
 ### Changed
 - **Nous is archived.** Living docs, agent files, issue/PR templates, and
   package comments no longer treat Nous as a live decision layer.
@@ -198,19 +218,9 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **`Signal.Validate`** allows `Series == uuid.Nil` for `outlier_cluster`
   (cohort-level by contract). Those signals can now persist instead of being
   silently dropped on save.
-- **MySQL backend** stores `explanation` and `confidence_class` and honours
-  `SignalFilter.ScopeIDs`, matching sqlite/postgres/memory.
 - **`pipeline.Compute` `SignalsCreated`** counts signals that actually saved,
   not detections that failed validation.
-- **Detection scheduler** skips a candidate when a signal with the same
-  `(scope, series, pattern, window)` already exists, so a second tick over
-  unchanged observations does not append duplicate rows (and does not
-  re-notify). A later tick that grows `window.End` (new points) still emits.
-  SQLite and Postgres now replace evidence on ID upsert (MySQL already did).
 - **Default `CHRONOS_MAX_SIGNALS`** is `100` (was `10`). `0` remains unlimited.
-- Agent and user docs (README, architecture, configuration, CLAUDE, AGENTS)
-  list all eleven detectors, the MySQL/libSQL backends, and the HTTP auth /
-  extra `/v1` routes that were already in the binary.
 
 ### Security
 - **`golang.org/x/mod` 0.37.0 → 0.40.0** — GO-2026-6179 / CVE-2026-56865
@@ -219,6 +229,37 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **`golang.org/x/text` 0.38.0 → 0.41.0** — GO-2026-5970 / CVE-2026-56852,
   infinite loop on invalid input in `golang.org/x/text/unicode/norm`. Reachable
   transitively; no API change.
+
+
+## [0.8.0] - 2026-07-11
+
+Maintenance release; no functional change. Reconstructed from the tag range
+during the 2026-09-19 audit, because no entry in `[Unreleased]` described it.
+
+### Changed
+- **`go.klarlabs.de/mcp` to v1.21.0, then v1.22.0** (#43, #46).
+- **nox 0.10.1 → 1.7.0**, with baseline adoption (#45).
+
+## [0.7.0] - 2026-07-03
+
+Largely build, supply-chain and dependency work. Reconstructed from the tag
+range during the 2026-09-19 audit.
+
+### Added
+- **Public per-backend shims for durable storage** (#41).
+
+### Changed
+- **Klarlabs library dependencies moved to `go.klarlabs.de` vanity paths.**
+- **The mnemos image is pulled from `ghcr.io/klarlabs-studio`**, which does
+  not redirect on GHCR.
+- Dependency and action bumps: goreleaser-action 6 → 7 (#34),
+  docker/login-action 3 → 4 (#33), actions/deploy-pages 4 → 5 (#32), and the
+  go-deps group (#37).
+
+### Fixed
+- **Eight false-positive nox findings suppressed**, goreleaser pinned to
+  `~> v2.15` (#36), and IAC-013 handled with a VEX waiver plus
+  `-fail-on-unwaived` (#33, #34).
 
 ## [0.6.0] - 2026-05-31
 
