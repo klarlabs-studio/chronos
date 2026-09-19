@@ -31,6 +31,7 @@ type Scheduler struct {
 	engine    *detect.Engine
 	interval  time.Duration
 	retention time.Duration
+	lookback  time.Duration
 	logger    *slog.Logger
 }
 
@@ -66,6 +67,27 @@ func (s *Scheduler) WithRetention(d time.Duration) *Scheduler {
 	s.retention = d
 	return s
 }
+
+// WithLookback bounds how much history each tick loads per scope, and
+// returns the scheduler for chaining. Zero or negative falls back to
+// defaultLookback rather than meaning "no bound": a zero cutoff is
+// time.Time{}, which as a query predicate matches every row ever
+// written and is precisely the unbounded read this exists to prevent.
+//
+// A setter for the same reason as WithRetention -- the constructor
+// already takes a time.Duration, and three adjacent durations are three
+// arguments a caller can transpose without the compiler noticing.
+func (s *Scheduler) WithLookback(d time.Duration) *Scheduler {
+	s.lookback = d
+	return s
+}
+
+// defaultLookback guards a Scheduler built without WithLookback, so a
+// library caller cannot construct the unbounded behaviour by omission.
+// It mirrors config.defaultDetectionLookback, which is the
+// operator-facing default on the serve path; this one is the
+// last-resort floor.
+const defaultLookback = 7 * 24 * time.Hour
 
 // Run blocks until ctx is cancelled, ticking detection every
 // interval. interval <= 0 is treated as disabled and Run returns
@@ -142,14 +164,32 @@ func (s *Scheduler) sweep(ctx context.Context) {
 
 // tick performs one full detection pass across all scopes. Errors on
 // any single scope are logged and do not abort the pass.
+//
+// Each scope is loaded through ListByScopeSince, never ListByScope.
+// The unbounded form has no limit and no window, and nothing prunes
+// entity_states, so its result grows for as long as the deployment
+// ingests. Calling it on a timer allocates the entire table every tick:
+// measured on a 73-series deployment as a flat 2Mi baseline followed by
+// ~1.9GB inside one 30-second tick, then OOM, repeating indefinitely.
+//
+// The allocation is here, before engine.Detect sees anything, which is
+// why disabling individual detectors did not move it. Detectors only
+// ever consult their own analysis window, so the history behind the
+// lookback was loaded and then ignored.
 func (s *Scheduler) tick(ctx context.Context) {
+	lookback := s.lookback
+	if lookback <= 0 {
+		lookback = defaultLookback
+	}
+	cutoff := time.Now().Add(-lookback)
+
 	scopes, err := s.states.ListScopes(ctx)
 	if err != nil {
 		s.logger.Error("scheduler: list scopes failed", "err", err)
 		return
 	}
 	for _, scopeID := range scopes {
-		states, err := s.states.ListByScope(ctx, scopeID)
+		states, err := s.states.ListByScopeSince(ctx, scopeID, cutoff)
 		if err != nil {
 			s.logger.Error("scheduler: load scope failed", "scope_id", scopeID, "err", err)
 			continue

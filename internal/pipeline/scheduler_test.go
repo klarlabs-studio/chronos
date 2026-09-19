@@ -289,3 +289,91 @@ func TestScheduler_SweepIsNoopWithoutRetention(t *testing.T) {
 		t.Fatalf("sweep with retention disabled deleted signals: %d remain, want 1", n)
 	}
 }
+
+// recordingStates wraps a real repository and records which of the two
+// scope-load methods the scheduler reached for. Embedding the interface
+// means it stays a valid EntityStateRepository as that interface grows.
+type recordingStates struct {
+	ports.EntityStateRepository
+	unbounded int
+	bounded   int
+	cutoff    time.Time
+}
+
+func (r *recordingStates) ListByScope(ctx context.Context, scopeID uuid.UUID) ([]chronos.EntityState, error) {
+	r.unbounded++
+	return r.EntityStateRepository.ListByScope(ctx, scopeID)
+}
+
+func (r *recordingStates) ListByScopeSince(ctx context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error) {
+	r.bounded++
+	r.cutoff = cutoff
+	return r.EntityStateRepository.ListByScopeSince(ctx, scopeID, cutoff)
+}
+
+// A tick must never issue an unbounded scope load. ListByScope has no
+// limit and no window, nothing prunes entity_states, so on a live
+// stream its result grows without bound -- a detection loop calling it
+// on a timer allocates the whole table every tick until the process is
+// OOM-killed. Measured at ~1.9GB in a single tick on 73 series.
+func TestScheduler_TickLoadsOnlyTheLookbackWindow(t *testing.T) {
+	cfg := config.Default()
+	mem := memory.New()
+	rec := &recordingStates{EntityStateRepository: mem.EntityStates}
+	ctx := context.Background()
+
+	scope := uuid.New()
+	entity := uuid.New()
+	now := time.Now()
+	// One observation inside the lookback and one far outside it.
+	for _, age := range []time.Duration{time.Minute, 90 * 24 * time.Hour} {
+		if err := mem.EntityStates.Ingest(ctx, "test", chronos.EntityState{
+			ID: uuid.New(), EntityID: entity, ScopeID: scope,
+			Timestamp: now.Add(-age), Features: []float64{1, 2},
+		}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	lookback := 24 * time.Hour
+	s := NewScheduler(rec, mem.Signals, detect.NewEngine(cfg), time.Second, nil).WithLookback(lookback)
+	s.tick(ctx)
+
+	if rec.unbounded != 0 {
+		t.Errorf("tick issued %d unbounded ListByScope call(s); it must never load the whole table", rec.unbounded)
+	}
+	if rec.bounded != 1 {
+		t.Fatalf("bounded loads = %d, want 1", rec.bounded)
+	}
+	if want := now.Add(-lookback); rec.cutoff.Sub(want).Abs() > time.Minute {
+		t.Errorf("cutoff = %v, want ~%v (now - lookback)", rec.cutoff, want)
+	}
+}
+
+// A lookback of zero must not silently mean "since the epoch" on one
+// hand or "load everything" on the other -- both would reintroduce the
+// unbounded read. Zero falls back to the configured default.
+func TestScheduler_ZeroLookbackFallsBackToDefault(t *testing.T) {
+	cfg := config.Default()
+	mem := memory.New()
+	rec := &recordingStates{EntityStateRepository: mem.EntityStates}
+	ctx := context.Background()
+
+	scope := uuid.New()
+	if err := mem.EntityStates.Ingest(ctx, "test", chronos.EntityState{
+		ID: uuid.New(), EntityID: uuid.New(), ScopeID: scope,
+		Timestamp: time.Now(), Features: []float64{1, 2},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	s := NewScheduler(rec, mem.Signals, detect.NewEngine(cfg), time.Second, nil).WithLookback(0)
+	s.tick(ctx)
+
+	if rec.unbounded != 0 {
+		t.Errorf("zero lookback fell through to an unbounded load (%d call(s))", rec.unbounded)
+	}
+	if rec.cutoff.IsZero() {
+		t.Error("zero lookback produced a zero cutoff, which loads the entire table")
+	}
+}

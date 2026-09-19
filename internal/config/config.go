@@ -20,8 +20,15 @@ type Config struct {
 	// alias so existing operator configurations keep working through
 	// the cutover; if DBDSN is empty at startup, the runtime
 	// translates the legacy pair into a DSN form.
-	DBDSN     string // e.g. sqlite:///chronos.db, postgres://user:pw@host/db?namespace=chronos
-	DBType    string // legacy: sqlite, postgres, memory
+	DBDSN  string // e.g. sqlite:///chronos.db, postgres://<user>:<password>@host/db?namespace=chronos
+	DBType string // legacy: sqlite, postgres, memory
+
+	// DetectionLookback bounds how much history each detection tick
+	// loads per scope. Detectors only ever consult their analysis
+	// window; loading the scope's entire recorded history to inspect
+	// the tail of it is what OOM-killed long-running engines.
+	DetectionLookback time.Duration
+
 	DBConnStr string // legacy: connection string or path
 
 	// Detection — common
@@ -141,6 +148,18 @@ type Config struct {
 	SignalRetention time.Duration
 }
 
+// defaultDetectionLookback bounds a detection tick's history load when
+// CHRONOS_DETECTION_LOOKBACK is unset.
+//
+// Seven days, not "everything". The previous behaviour was unbounded
+// and is the defect this replaces, so defaulting to unbounded would
+// leave every deployment on the broken path until it opted out. Seven
+// days is chosen over something tighter because seasonality needs more
+// than one cycle of a daily or weekly rhythm to distinguish it from a
+// trend, and that is the detector with the longest memory. Deployments
+// that need less should set it lower; the cost is linear in the window.
+const defaultDetectionLookback = 7 * 24 * time.Hour
+
 // Default returns sensible defaults.
 func Default() *Config {
 	return &Config{
@@ -204,6 +223,7 @@ func Default() *Config {
 		WebhookRetries: defaultEnvInt("CHRONOS_WEBHOOK_RETRIES", 1),
 
 		DetectionInterval: defaultEnvDuration("CHRONOS_DETECTION_INTERVAL", 0),
+		DetectionLookback: defaultEnvDuration("CHRONOS_DETECTION_LOOKBACK", defaultDetectionLookback),
 		SignalRetention:   defaultEnvDuration("CHRONOS_SIGNAL_RETENTION", 0),
 	}
 }

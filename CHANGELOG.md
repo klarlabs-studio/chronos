@@ -4,6 +4,69 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [0.12.0] - 2026-09-19
+
+### Fixed
+- **The detection scheduler no longer loads a scope's entire history on
+  every tick.** `tick` called `ListByScope`, which has no limit and no
+  window, once per scope per interval. Nothing prunes `entity_states` —
+  `DeleteOlderThan` has existed on `EntityStateRepository` since the
+  beginning and had no caller anywhere in the tree — so that result grew
+  for as long as a deployment ingested, and a scheduler on a 30-second
+  timer re-materialised the whole table every 30 seconds.
+
+  Measured on a 73-series deployment: a flat 2 MiB baseline, ~1.9 GiB
+  allocated inside a single tick, OOMKill, repeating. It tracks table
+  size rather than ingest rate, so raising the memory limit lengthened
+  the cycle instead of stopping it, and restarting reclaimed nothing.
+
+  This is a **second** unbounded read, distinct from the one fixed in
+  0.11.0. That one was the per-tick duplicate check against the
+  `signals` table; this is the history load against `entity_states`, and
+  it dominates. 0.11.0 alone did not stop the OOMKills.
+
+  The load happens before `Detect` is called, which is why disabling
+  individual detectors — including correlation, the only `O(N²)` one —
+  did not move it. Detectors only consult their own analysis window, so
+  everything behind it was loaded and then ignored.
+
+  `ports.EntityStateRepository` gains `ListByScopeSince`, implemented
+  across memory, sqlite, postgres and mysql and forwarded by the
+  batching decorator. `CHRONOS_DETECTION_LOOKBACK` (default `168h`)
+  bounds the window. A regression test fails if a tick ever issues an
+  unbounded scope load again, and a second asserts that a zero lookback
+  falls back to the default rather than producing a zero cutoff — which
+  as a predicate matches every row ever written.
+
+- **`serve` logged the wrong storage backend.** The startup line took
+  `store` from `cfg.DBType`, the legacy selector, which defaults to
+  `sqlite` whether or not it is in use. `resolveDSN` prefers
+  `CHRONOS_DB_DSN` and only falls back to `DBType`, so any deployment
+  configured the modern way — the only way to pass a `?namespace=`
+  parameter — announced `store=sqlite` while running on Postgres. It now
+  reports the scheme of the DSN that actually selected the backend.
+  Only the scheme: the DSN carries credentials and never reaches a log.
+
+- **A transient failure opening the store is no longer fatal.** Starting
+  under an orchestrator regularly loses a race against the process's own
+  networking — the container runs before service routing into its
+  namespace is programmed, so the first dial is refused and every
+  subsequent one succeeds. Observed on every rollout, with identical
+  start and finish timestamps against a database that had not moved in
+  nine hours. `serve` now retries the initial connection five times at
+  two-second intervals. A misconfigured DSN still fails, because it
+  fails identically on every attempt.
+
+### Added
+- **`CHRONOS_DETECTION_LOOKBACK`** — how much history each detection
+  tick loads per scope, defaulting to `168h`.
+
+  Defaulting to unbounded was considered and rejected: unbounded is the
+  defect, so that default would leave every deployment on the broken
+  path until it opted out. Seven days is sized for seasonality, the
+  detector with the longest memory, which needs more than one cycle of a
+  daily or weekly rhythm to tell it from a trend.
+
 ## [0.11.0] - 2026-09-19
 
 ### Fixed

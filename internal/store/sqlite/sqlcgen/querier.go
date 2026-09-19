@@ -13,6 +13,7 @@ type Querier interface {
 	DeleteOldEntityStates(ctx context.Context, arg DeleteOldEntityStatesParams) error
 	GetEntityStatesByEntity(ctx context.Context, entityID string) ([]EntityState, error)
 	GetEntityStatesByScope(ctx context.Context, scopeID string) ([]EntityState, error)
+	GetEntityStatesByScopeSince(ctx context.Context, arg GetEntityStatesByScopeSinceParams) ([]EntityState, error)
 	GetSignalByID(ctx context.Context, id string) (Signal, error)
 	GetSignalEvidence(ctx context.Context, signalID string) ([]SignalEvidence, error)
 	InsertEntityState(ctx context.Context, arg InsertEntityStateParams) error

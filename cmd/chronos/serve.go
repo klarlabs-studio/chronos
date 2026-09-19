@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -50,17 +51,20 @@ func runServe(args []string) error {
 		return NewUserError("serve: invalid configuration: %v", err)
 	}
 
+	// Constructed before the store opens so the connect retry has
+	// somewhere to report; nothing above this point logs.
+	logger := slog.Default().With("cmd", "serve")
+
 	dsn, err := resolveDSN(cfg)
 	if err != nil {
 		return NewUserError("serve: %v", err)
 	}
-	conn, err := store.Open(context.Background(), dsn)
+	conn, err := openStoreWithRetry(context.Background(), dsn, logger)
 	if err != nil {
 		return NewSystemError(err, "serve: open store: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
 
-	logger := slog.Default().With("cmd", "serve")
 	metrics := observability.New()
 
 	// Build the notifier set: webhooks (cross-process) + SSE
@@ -160,7 +164,8 @@ func runServe(args []string) error {
 	// which is what makes SSE see anything.
 	if cfg.DetectionInterval > 0 {
 		sched := pipeline.NewScheduler(conn.EntityStates, signals, pipeline.NewEngine(cfg).WithMetrics(metrics), cfg.DetectionInterval, logger).
-			WithRetention(cfg.SignalRetention)
+			WithRetention(cfg.SignalRetention).
+			WithLookback(cfg.DetectionLookback)
 		go func() {
 			if err := sched.Run(rootCtx); err != nil {
 				logger.Error("scheduler exited with error", "err", err)
@@ -184,8 +189,9 @@ func runServe(args []string) error {
 		_ = httpSrv.Shutdown(ctx)
 	}()
 
-	logger.Info("listening", "addr", addr, "store", cfg.DBType,
-		"detection_interval", cfg.DetectionInterval, "signal_retention", cfg.SignalRetention,
+	logger.Info("listening", "addr", addr, "store", storeKind(dsn),
+		"detection_interval", cfg.DetectionInterval, "detection_lookback", cfg.DetectionLookback,
+		"signal_retention", cfg.SignalRetention,
 		"webhooks", len(cfg.WebhookURLs),
 		"grpc_port", cfg.GRPCPort)
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -225,4 +231,76 @@ func checkBearer(ctx context.Context, token string) error {
 		return status.Error(codes.Unauthenticated, "invalid token")
 	}
 	return nil
+}
+
+// storeConnectAttempts and storeConnectBackoff bound the wait for a
+// database that is reachable a moment later than the process starts.
+const (
+	storeConnectAttempts = 5
+	storeConnectBackoff  = 2 * time.Second
+)
+
+// openStoreWithRetry opens the store, retrying a failing connection a
+// bounded number of times before giving up.
+//
+// Starting under an orchestrator regularly loses a race against the
+// process's own networking: the container is running before the
+// service routing into its namespace is programmed, so the very first
+// dial is refused and every subsequent one succeeds. Observed on every
+// single rollout of this engine, with identical start and finish
+// timestamps and a database that had not moved in nine hours.
+//
+// Without this the process exits, which an orchestrator papers over by
+// restarting it -- but it burns a restart on every deploy, and the
+// restart counter is exactly the instrument an operator watches to
+// decide whether a memory fix worked. A misconfigured DSN still fails,
+// because it fails identically on every attempt.
+func openStoreWithRetry(ctx context.Context, dsn string, logger *slog.Logger) (*store.Conn, error) {
+	var err error
+	for attempt := 1; attempt <= storeConnectAttempts; attempt++ {
+		var conn *store.Conn
+		conn, err = store.Open(ctx, dsn)
+		if err == nil {
+			if attempt > 1 && logger != nil {
+				logger.Info("store connected after retry", "attempts", attempt)
+			}
+			return conn, nil
+		}
+		if attempt == storeConnectAttempts {
+			break
+		}
+		if logger != nil {
+			// The error carries host and database but not the password;
+			// the DSN itself is never logged.
+			logger.Warn("store connect failed; retrying",
+				"attempt", attempt, "of", storeConnectAttempts,
+				"backoff", storeConnectBackoff, "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(storeConnectBackoff):
+		}
+	}
+	return nil, err
+}
+
+// storeKind names the backend for logging, derived from the DSN that
+// actually selected it.
+//
+// It used to log cfg.DBType, which is the legacy selector and defaults
+// to "sqlite" whether or not it is in use. resolveDSN prefers
+// CHRONOS_DB_DSN and only falls back to DBType, so any deployment
+// configured the modern way -- the only way to pass a ?namespace=
+// parameter -- announced "store=sqlite" while running on Postgres. A
+// line that names the wrong storage backend is worse than no line,
+// because it gets believed.
+//
+// Only the scheme is returned. The DSN carries credentials and must
+// never reach a log.
+func storeKind(dsn string) string {
+	if i := strings.Index(dsn, "://"); i > 0 {
+		return dsn[:i]
+	}
+	return "unknown"
 }
