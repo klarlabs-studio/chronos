@@ -39,8 +39,17 @@ services:
     command: ["serve"]
     volumes:
       - chronos-data:/data
+    # Probe with the binary, not wget. The runtime image is
+    # gcr.io/distroless/static:nonroot -- no shell, no wget, no curl --
+    # which is exactly why `chronos health` exists and why the Dockerfile
+    # already declares HEALTHCHECK ["/chronos", "health"]. Overriding
+    # that with wget makes the container permanently unhealthy, so
+    # `compose up --wait` fails with "dependency failed to start:
+    # container chronos-integration is unhealthy" and the nightly job
+    # never reaches the smoke test. It had been red for 12 consecutive
+    # runs.
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7778/health"]
+      test: ["CMD", "/chronos", "health"]
       interval: 2s
       timeout: 1s
       retries: 30
