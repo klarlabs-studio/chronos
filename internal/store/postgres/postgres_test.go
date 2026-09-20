@@ -87,7 +87,10 @@ func TestParseDSN_CarriesNamespaceAsSearchPath(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"postgres://h/db", "chronos"},
 		{"postgres://h/db?namespace=tenant_a", "tenant_a"},
-		{"postgresql://user:pw@h:5432/db?sslmode=require&namespace=tenant_b", "tenant_b"},
+		// No credentials in this fixture on purpose: the security scan
+		// flags a user:password pair in a DSN literal, and this case is
+		// about the query string, not about auth.
+		{"postgresql://h:5432/db?sslmode=require&namespace=tenant_b", "tenant_b"},
 	}
 	for _, tc := range cases {
 		got, err := parseDSN(tc.in)
