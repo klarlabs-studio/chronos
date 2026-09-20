@@ -76,15 +76,25 @@ func TestCrossTalk_IngestThenList(t *testing.T) {
 	}
 }
 
-// TestCrossTalk_MnemosClaimRoundTrip pins the mnemos write+read
-// path. Appends an event + claim, then reads the claims list back
-// and verifies the seeded row surfaces.
-func TestCrossTalk_MnemosClaimRoundTrip(t *testing.T) {
+// TestCrossTalk_MnemosEpisodeRoundTrip pins the mnemos write+read
+// path. Appends an episode, then reads the episode list back and
+// verifies the seeded row surfaces.
+//
+// The endpoint is /v1/episodes, not /v1/events. mnemos renamed the
+// route, the request field and the response key together; this test
+// was written against the old names and had been failing ever since.
+// Diagnosing it is easy to get wrong, because the auth middleware
+// short-circuits before the router: unauthenticated, the dead route
+// answers 401 "missing bearer token", which reads like a pure auth
+// problem and hides the 404 underneath. Both had to be fixed, and
+// the 401 is the one you see first.
+func TestCrossTalk_MnemosEpisodeRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	runID := "integration:" + newUUID()
+	token := mnemosToken(t)
 
-	postJSON(t, mnemosBaseURL()+"/v1/events", map[string]any{
-		"events": []map[string]any{{
+	postJSON(t, mnemosBaseURL()+"/v1/episodes", map[string]any{
+		"episodes": []map[string]any{{
 			"id":              "ev_smoke_" + newUUID(),
 			"run_id":          runID,
 			"schema_version":  "v1",
@@ -93,13 +103,33 @@ func TestCrossTalk_MnemosClaimRoundTrip(t *testing.T) {
 			"timestamp":       now,
 			"ingested_at":     now,
 		}},
-	}, http.StatusCreated)
+	}, http.StatusCreated, token)
 
-	resp := getJSON(t, fmt.Sprintf("%s/v1/events?run_id=%s", mnemosBaseURL(), runID))
-	events, ok := resp["events"].([]any)
-	if !ok || len(events) != 1 {
-		t.Fatalf("expected 1 event under %s, got %+v", runID, resp)
+	resp := getJSON(t, fmt.Sprintf("%s/v1/episodes?run_id=%s", mnemosBaseURL(), runID), token)
+	episodes, ok := resp["episodes"].([]any)
+	if !ok || len(episodes) != 1 {
+		t.Fatalf("expected 1 episode under %s, got %+v", runID, resp)
 	}
+}
+
+// mnemosToken returns the bearer token for the mnemos API. mnemos is
+// secure by default -- every /v1 request needs a token, reads
+// included -- so there is no anonymous mode to fall back to.
+//
+// Fails rather than skips when unset. A skip here is how this suite
+// would go quietly green while testing nothing, which is the failure
+// mode this file already lived through.
+func mnemosToken(t *testing.T) string {
+	t.Helper()
+	tok := os.Getenv("MNEMOS_INTEGRATION_TOKEN")
+	if tok == "" {
+		t.Fatal("MNEMOS_INTEGRATION_TOKEN is unset. Mint one against the compose stack:\n" +
+			"  docker compose -f test/integration/docker-compose.yml exec -T mnemos \\\n" +
+			"    mnemos user create --name smoke --email smoke@integration.local --scope events:write\n" +
+			"  docker compose -f test/integration/docker-compose.yml exec -T mnemos \\\n" +
+			"    mnemos token issue --user <user_id> --ttl 1h")
+	}
+	return tok
 }
 
 func newUUID() string {
@@ -131,10 +161,22 @@ func waitForHealth(url string, total time.Duration) error {
 	return fmt.Errorf("%s never returned 200 within %s", url, total)
 }
 
-func postJSON(t *testing.T, url string, body any, expectStatus int) {
+// postJSON and getJSON take the bearer token as a variadic trailing
+// argument: chronos needs no auth on these routes and passes none,
+// mnemos requires one on every request. Variadic rather than a plain
+// parameter so the chronos call sites stay free of a "" that would
+// read as "no token needed here" in one place and "token forgotten"
+// in another.
+func postJSON(t *testing.T, url string, body any, expectStatus int, token ...string) {
 	t.Helper()
 	buf, _ := json.Marshal(body)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(buf))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(buf))
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	setBearer(req, token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
@@ -145,9 +187,14 @@ func postJSON(t *testing.T, url string, body any, expectStatus int) {
 	}
 }
 
-func getJSON(t *testing.T, url string) map[string]any {
+func getJSON(t *testing.T, url string, token ...string) map[string]any {
 	t.Helper()
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	setBearer(req, token)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
@@ -161,4 +208,10 @@ func getJSON(t *testing.T, url string) map[string]any {
 		t.Fatalf("decode %s: %v", url, err)
 	}
 	return out
+}
+
+func setBearer(req *http.Request, token []string) {
+	if len(token) > 0 && token[0] != "" {
+		req.Header.Set("Authorization", "Bearer "+token[0])
+	}
 }
