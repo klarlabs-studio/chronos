@@ -225,8 +225,12 @@ func (e *Engine) detectParallel(ctx context.Context, byScope map[uuid.UUID][]chr
 	return out
 }
 
+// sortByTimestampAsc orders observations ascending by (timestamp, ID).
+// Equal timestamps are broken by observation ID so detector input order
+// is deterministic regardless of ingest or store retrieval order — see
+// docs/temporal-contract.md.
 func sortByTimestampAsc(states []chronos.EntityState) {
 	sort.SliceStable(states, func(i, j int) bool {
-		return states[i].Timestamp.Before(states[j].Timestamp)
+		return beforeByTimeThenID(states[i], states[j])
 	})
 }

@@ -123,3 +123,75 @@ func TestEngine_GroupsByScopeAndCaps(t *testing.T) {
 		t.Errorf("MaxSignalsPerRun=1 returned %d signals", len(got))
 	}
 }
+
+func TestRecurrence_SkipsRaggedFeatureVectors(t *testing.T) {
+	d := NewRecurrence(defaultCfg())
+	scope := uuid.New()
+	a, b, c := uuid.New(), uuid.New(), uuid.New()
+	now := time.Now()
+	// Peers b and c are cosine-similar to a but have a different feature
+	// arity — Cosine would return 0; fail-closed means skip, not emit.
+	states := []chronos.EntityState{
+		{ID: uuid.New(), EntityID: a, ScopeID: scope, Timestamp: now, Features: []float64{1, 2, 3, 5}},
+		{ID: uuid.New(), EntityID: b, ScopeID: scope, Timestamp: now.Add(-time.Hour), Features: []float64{1.1, 2.1}},
+		{ID: uuid.New(), EntityID: c, ScopeID: scope, Timestamp: now.Add(-2 * time.Hour), Features: []float64{1.05, 2.05}},
+	}
+	got := d.Detect(context.Background(), scope, states)
+	if len(got) != 0 {
+		t.Fatalf("got %d signals from ragged peers, want 0", len(got))
+	}
+}
+
+func TestRecurrence_SkipsZeroNormVectors(t *testing.T) {
+	d := NewRecurrence(defaultCfg())
+	scope := uuid.New()
+	a, b, c := uuid.New(), uuid.New(), uuid.New()
+	now := time.Now()
+	states := []chronos.EntityState{
+		{ID: uuid.New(), EntityID: a, ScopeID: scope, Timestamp: now, Features: []float64{0, 0, 0, 0}},
+		{ID: uuid.New(), EntityID: b, ScopeID: scope, Timestamp: now.Add(-time.Hour), Features: []float64{1, 2, 3, 5}},
+		{ID: uuid.New(), EntityID: c, ScopeID: scope, Timestamp: now.Add(-2 * time.Hour), Features: []float64{1.1, 2.1, 3.1, 5.1}},
+	}
+	got := d.Detect(context.Background(), scope, states)
+	if len(got) != 0 {
+		t.Fatalf("got %d signals for zero-norm subject, want 0", len(got))
+	}
+}
+
+func TestMostRecentByEntity_EqualTimestampPrefersLargerID(t *testing.T) {
+	entity := uuid.New()
+	scope := uuid.New()
+	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	lo := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	hi := uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	states := []chronos.EntityState{
+		{ID: lo, EntityID: entity, ScopeID: scope, Timestamp: ts, Features: []float64{1}},
+		{ID: hi, EntityID: entity, ScopeID: scope, Timestamp: ts, Features: []float64{2}},
+	}
+	got := mostRecentByEntity(states)
+	if got[entity].ID != hi {
+		t.Fatalf("most recent ID = %s, want %s (larger ID wins equal-timestamp ties)", got[entity].ID, hi)
+	}
+	// Reverse input order — result must be stable.
+	states[0], states[1] = states[1], states[0]
+	got = mostRecentByEntity(states)
+	if got[entity].ID != hi {
+		t.Fatalf("after reverse, most recent ID = %s, want %s", got[entity].ID, hi)
+	}
+}
+
+func TestSortByTimestampAsc_equalTimestampBreaksByID(t *testing.T) {
+	entity := uuid.New()
+	scope := uuid.New()
+	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	lo := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	hi := uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	states := []chronos.EntityState{
+		{ID: hi, EntityID: entity, ScopeID: scope, Timestamp: ts, Features: []float64{2}},
+		{ID: lo, EntityID: entity, ScopeID: scope, Timestamp: ts, Features: []float64{1}},
+	}
+	sortByTimestampAsc(states)
+	if states[0].ID != lo || states[1].ID != hi {
+		t.Fatalf("order = [%s, %s], want [%s, %s]", states[0].ID, states[1].ID, lo, hi)
+	}
+}

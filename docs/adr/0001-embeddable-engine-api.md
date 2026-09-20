@@ -56,6 +56,16 @@ surface is publicised.
 configured Chronos embeddings in one process should each own a
 `Registry` rather than sharing the default.
 
+### Store provider registry isolation (Intent P2)
+
+`store.Registry` mirrors the adapter pattern for storage providers
+(`NewRegistry`, `Clone`, `Register` / `Open` / `Schemes`). Package-level
+`store.Register` / `Open` / `SupportedSchemes` delegate to
+`store.DefaultRegistry()`. Unlike adapter registration (last-write-wins),
+provider registration **panics on duplicate schemes** so collisions
+surface at startup. `embed.WithStoreRegistry` lets an Engine open
+storage against an isolated clone.
+
 ## Consequences
 
 **Positive:**

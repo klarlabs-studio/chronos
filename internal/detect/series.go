@@ -48,6 +48,28 @@ func sortedUUIDKeys[V any](m map[uuid.UUID]V) []uuid.UUID {
 	return ids
 }
 
+// beforeByTimeThenID reports whether a should sort before b under the
+// (timestamp ascending, observation ID ascending) total order. Equal
+// timestamps are broken by ID so detector input is deterministic
+// regardless of ingest or store retrieval order.
+func beforeByTimeThenID(a, b chronos.EntityState) bool {
+	if a.Timestamp.Equal(b.Timestamp) {
+		return a.ID.String() < b.ID.String()
+	}
+	return a.Timestamp.Before(b.Timestamp)
+}
+
+// afterByTimeThenID reports whether a is strictly later than b under
+// the same (timestamp, observation ID) total order. Equal timestamps
+// prefer the larger observation ID so "most recent" among ties matches
+// the last element of an ascending sort.
+func afterByTimeThenID(a, b chronos.EntityState) bool {
+	if a.Timestamp.Equal(b.Timestamp) {
+		return a.ID.String() > b.ID.String()
+	}
+	return a.Timestamp.After(b.Timestamp)
+}
+
 // isFinite reports whether x is a real number — neither NaN nor an
 // infinity. Detectors use it to reject derived statistics that
 // overflowed: every comparison against NaN is false, so an unguarded

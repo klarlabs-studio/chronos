@@ -30,11 +30,12 @@ It implements Intent principle 4 ([`intent.md`](intent.md)).
 ### Persistence → retrieval
 
 - `ListByScope` / `ListByScopeSince` / `ListByEntity` return observations **most recent first** (descending timestamp).
-- Relative order among rows that share an identical timestamp is **undefined** unless a backend documents a stronger guarantee. Callers and detectors must not rely on secondary keys for equal-timestamp ties unless a specific contract says otherwise.
+- Relative order among rows that share an identical timestamp is **undefined** at the store layer unless a backend documents a stronger guarantee. The detection Engine re-establishes a total order (see below), so detectors must not depend on store tie-breaking.
 
 ### Detection
 
-- The Engine groups observations by `ScopeID`, then sorts each group **ascending by timestamp** before calling detectors.
+- The Engine groups observations by `ScopeID`, then sorts each group **ascending by `(timestamp, observation ID)`** before calling detectors. Equal timestamps are broken by lexicographic observation ID so input order is deterministic regardless of ingest or retrieval order.
+- Detectors that select a "most recent" observation per entity (`mostRecentByEntity`) use the same total order: equal timestamps prefer the larger observation ID (last in the ascending sort).
 - Detectors that key internal maps by series ID (or any other unordered key) must sort those keys before emitting so signal order is deterministic across runs.
 - Final Engine output is sorted by `detected-at` descending, then `confidence` descending, then capped at `MaxSignalsPerRun`. Because that sort is stable, non-deterministic emission order would silently change which signals survive truncation — determinism is therefore a correctness property, not a nicety.
 
@@ -57,7 +58,7 @@ It implements Intent principle 4 ([`intent.md`](intent.md)).
 ## Missing features and malformed numerics
 
 - An observation with an empty `Features` slice is rejected by `Validate` (`ErrMissingFeatures`).
-- Partial / ragged feature sets across a series are adapter concerns: Chronos does not impute. Detectors operate on the outcome convention (last feature) and documented peer comparisons; they must tolerate length differences only where their algorithm defines that case, otherwise skip.
+- Partial / ragged feature sets across a series are adapter concerns: Chronos does not impute. Peer-comparison detectors (Recurrence, Anomaly) **fail closed** on length-mismatched or zero-norm vectors — cosine similarity is undefined in those cases, so the peer is skipped rather than treated as dissimilar (`Cosine` returning 0). Detectors that operate only on the outcome convention (last feature) are unaffected.
 - `NaN`, `+Inf`, and `-Inf` never enter the pipeline (`ErrNonFiniteFeature`). Finite extremes (`MaxFloat64`, denormals, zero) are valid.
 
 ## Signals over time

@@ -351,7 +351,7 @@ Before significantly expanding Chronos’s detector catalog, prioritize hardenin
 | **P1** | Temporal contract — deterministic ordering and duplicate semantics | Done ([`temporal-contract.md`](temporal-contract.md) + embed OOO integration test) |
 | **P1** | Storage conformance — reusable backend contract suite on every backend | Done (`internal/store/conformance`) |
 | **P2** | Contract consistency — terminology and documentation drift | Done for Intent adoption; ongoing maintenance |
-| **P2** | Embeddability — injectable `chronos.Registry`; `cmd/chronos compute` dogfoods `embed` | Done |
+| **P2** | Embeddability — injectable `chronos.Registry`; injectable `store.Registry` (+ `embed.WithStoreRegistry`); `cmd/chronos compute` dogfoods `embed` | Done |
 
 See [`../ROADMAP.md`](../ROADMAP.md) for near-term scope beyond this hardening track.
 
