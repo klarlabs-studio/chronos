@@ -368,12 +368,12 @@ func signalScopeIDWithScopeIDs(t *testing.T, b Backend) {
 	}
 
 	// Every backend intersects the two predicates: ScopeID AND
-	// ScopeIDs. The port's doc comment says the opposite ("ScopeID acts
-	// as a single additional allowed scope", i.e. a union). The
-	// behaviour is uniform across backends, so this suite pins the
-	// behaviour; the doc comment is the thing that is wrong, and it is
-	// reported as such rather than silently satisfied by a looser
-	// assertion here.
+	// ScopeIDs. The port's doc comment used to say the opposite
+	// ("ScopeID acts as a single additional allowed scope", i.e. a
+	// union); this suite pinned the behaviour and reported the comment
+	// as the defect rather than satisfying it with a looser assertion
+	// here. The comment has since been corrected to match. The two are
+	// now a matched pair: change either and this group fails.
 	got, err := s.Signals.List(ctx, ports.SignalFilter{ScopeID: scopeA, ScopeIDs: []uuid.UUID{scopeA, scopeB}})
 	if err != nil {
 		t.Fatalf("List: %v", err)

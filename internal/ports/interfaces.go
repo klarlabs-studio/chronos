@@ -92,8 +92,26 @@ type SignalFilter struct {
 
 	// ScopeIDs restricts results to a set of scopes (server-side
 	// allowlist). Use this when fetching across N entities owned by one
-	// consumer to avoid the N+1 round-trip pattern. May be combined
-	// with ScopeID (ScopeID acts as a single additional allowed scope).
+	// consumer to avoid the N+1 round-trip pattern.
+	//
+	// ScopeID and ScopeIDs INTERSECT when both are set: a signal must
+	// match ScopeID and also appear in ScopeIDs. They are not a union,
+	// and setting a ScopeID that is absent from ScopeIDs therefore
+	// matches nothing at all.
+	//
+	// This comment previously described a union -- "ScopeID acts as a
+	// single additional allowed scope" -- which no implementation has
+	// ever done. All five backends build the two as separate AND'ed
+	// predicates; the documentation was the outlier, not the code, so
+	// the documentation is what changed. Five independent
+	// implementations agreeing is the stronger evidence of intent, and
+	// switching them to a union would silently widen existing queries
+	// -- the kind of change a caller discovers by leaking data across
+	// scopes, not by a compile error.
+	//
+	// Prefer setting exactly one of the two. The storage conformance
+	// suite's "Signal/ScopeIDWithScopeIDs" group pins this against every
+	// backend, so the comment and the behaviour cannot drift apart again.
 	ScopeIDs []uuid.UUID
 
 	// Series, when set, restricts results to signals about a single
