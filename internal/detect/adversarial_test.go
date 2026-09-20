@@ -329,6 +329,39 @@ func TestTrend_ExactMinimumSampleReportsLowerConfidenceThanStrength(t *testing.T
 
 // --- Spike / Drop ----------------------------------------------------------
 
+// TestSpike_ExactMinimumSampleReportsLowerConfidenceThanStrength is
+// the Spike counterpart of the Trend case above, and replaces the
+// finding that used to sit in the section at the bottom of this file:
+// Spike and Drop set Confidence = Strength, so six observations — the
+// fewest the detector accepts — reported Confidence 1.0 while the
+// class alongside it said "tentative". The number now derives from the
+// evidence rather than the magnitude, and the two agree.
+func TestSpike_ExactMinimumSampleReportsLowerConfidenceThanStrength(t *testing.T) {
+	scope := uuid.New()
+	d := NewSpike(advCfg())
+	// Six observations: five of baseline plus the point under test.
+	got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, []float64{1, 1.1, 0.9, 1, 1.05, 900}))
+	if len(got) != 1 {
+		t.Fatalf("got %d signals, want 1", len(got))
+	}
+	s := got[0]
+	if s.Strength != 1 {
+		t.Errorf("Strength = %v, want 1 for a deviation past the saturation point", s.Strength)
+	}
+	if s.Confidence >= s.Strength {
+		t.Errorf("Confidence = %v, Strength = %v: at the minimum sample count confidence must be strictly lower", s.Confidence, s.Strength)
+	}
+	if s.ConfidenceClass != domain.ConfidenceClassTentative {
+		t.Errorf("ConfidenceClass = %q, want %q at n == window+1", s.ConfidenceClass, domain.ConfidenceClassTentative)
+	}
+	// A tentative class caps support at ESTABLISHED/STRONG, so the
+	// number cannot claim more certainty than the class does.
+	if ceiling := advCfg().ConfidenceClassEstablished / advCfg().ConfidenceClassStrong; s.Confidence >= ceiling {
+		t.Errorf("Confidence = %v, want below the %v a tentative class permits", s.Confidence, ceiling)
+	}
+	advAssertSane(t, got)
+}
+
 func TestSpikeDrop_Adversarial(t *testing.T) {
 	scope := uuid.New()
 	// SpikeWindow is 5, so a signal needs at least six observations.
@@ -768,36 +801,6 @@ func TestCrossScopeCorrelation_OutOfOrderInputIsSortedInternally(t *testing.T) {
 // left in place because changing it would change what the detectors
 // mean, not just how they compute. They assert the behaviour that
 // exists today so a future change to it is visible.
-
-// TestFinding_SpikeConfidenceEqualsStrengthAtMinimumSamples records
-// that Spike and Drop set Confidence = Strength, so six observations
-// — the minimum the detector accepts — yield Confidence 1.0.
-//
-// Chronos states that strength describes the magnitude of the
-// observed pattern and confidence the quality of the evidence, and
-// that the two must remain distinct. Spike and Drop collapse them by
-// design (see the type comment on Spike), so the thinnest admissible
-// window can report maximum certainty. Every other detector scales
-// confidence by a sample-size factor.
-func TestFinding_SpikeConfidenceEqualsStrengthAtMinimumSamples(t *testing.T) {
-	scope := uuid.New()
-	d := NewSpike(advCfg())
-	// Six observations: five of baseline plus the point under test.
-	got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, []float64{1, 1.1, 0.9, 1, 1.05, 900}))
-	if len(got) != 1 {
-		t.Fatalf("got %d signals, want 1", len(got))
-	}
-	s := got[0]
-	if s.Confidence != s.Strength {
-		t.Errorf("Confidence = %v, Strength = %v: this test exists because they are currently equal", s.Confidence, s.Strength)
-	}
-	if s.Confidence != 1 {
-		t.Errorf("Confidence = %v, want 1 — the finding is that six samples produce maximum confidence", s.Confidence)
-	}
-	if s.ConfidenceClass != domain.ConfidenceClassTentative {
-		t.Errorf("ConfidenceClass = %q, want %q: the class says tentative while the number says certain", s.ConfidenceClass, domain.ConfidenceClassTentative)
-	}
-}
 
 // TestFinding_TwoPointCorrelationIsAlwaysPerfect records that
 // Correlation accepts CorrelationMinPoints as low as 2, and any two
