@@ -10,6 +10,7 @@
 //	defer eng.Close()
 //
 //	state := chronos.EntityState{
+//	    ID:        uuid.New(),
 //	    EntityID:  someEntityID,
 //	    ScopeID:   someScopeID,
 //	    Timestamp: time.Now(),

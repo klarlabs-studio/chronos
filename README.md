@@ -93,7 +93,10 @@ Chronos doesn't replace any of these. It complements them by giving you a layer 
 
 ## Design principles
 
+Authoritative Intent: [`docs/intent.md`](docs/intent.md). Temporal semantics: [`docs/temporal-contract.md`](docs/temporal-contract.md).
+
 - **Signals, not opinions.** Each signal carries Pattern, Strength, Confidence, Window, and Evidence. There is no Title, no Summary, no Suggestion. Interpretation is the consumer's job.
+- **Shape, not state.** Chronos detects temporal structure (trends, spikes, change points, …), not threshold breaches alone.
 - **Domain-agnostic.** Athletes, servers, sensors, stocks — all flow through the `chronos.Source` adapter port.
 - **Loosely coupled.** Chronos works standalone. The stack composes through stable contracts, not internal coupling.
 - **Lightweight.** Single Go binary. Pure-Go SQLite (no CGO). Five backends; pick one per deployment.

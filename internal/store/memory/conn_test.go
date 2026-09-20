@@ -53,7 +53,11 @@ func TestEntityStateRepository_IngestAndBatchSave(t *testing.T) {
 
 func TestEntityStateRepository_RejectsInvalid(t *testing.T) {
 	c := New()
-	err := c.EntityStates.Ingest(context.Background(), "ad", chronos.EntityState{Timestamp: time.Now(), Features: []float64{1}})
+	err := c.EntityStates.Ingest(context.Background(), "ad", chronos.EntityState{
+		ID:        uuid.New(),
+		Timestamp: time.Now(),
+		Features:  []float64{1},
+	})
 	if !errors.Is(err, chronos.ErrMissingEntityID) {
 		t.Fatalf("Ingest invalid = %v, want ErrMissingEntityID", err)
 	}

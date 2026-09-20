@@ -78,6 +78,7 @@ func TestProcess_RejectsInvalidState(t *testing.T) {
 	defer func() { _ = eng.Close() }()
 
 	bad := chronos.EntityState{
+		ID: uuid.New(),
 		// EntityID intentionally zero
 		ScopeID:   uuid.New(),
 		Timestamp: time.Now(),

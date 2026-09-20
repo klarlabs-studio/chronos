@@ -33,9 +33,13 @@ type EntityState struct {
 
 `Validate()` enforces the invariants:
 
+- `ID` (observation ID) is non-zero — the persistence idempotency key
 - `EntityID` and `ScopeID` are non-zero
-- `Features` is non-empty
-- `Labels`, when set, has the same length as `Features`
+- `Timestamp` is non-zero (wire transports default omitted timestamps to now before constructing an `EntityState`)
+- `Features` is non-empty and every value is finite (no NaN / ±Inf)
+- `Labels`, when set, has the same length as `Features` and no blank names
+
+HTTP, gRPC, and MCP mint a UUID when the wire omits `id`. Embedded callers (`embed.Engine.Process`) must set `ID` themselves. See [`temporal-contract.md`](temporal-contract.md).
 
 ## Engine conventions adapters must follow
 
@@ -143,5 +147,5 @@ For a worked example of an out-of-tree adapter, see [`felixgeelhaar/ascend`](htt
 
 - **Forgetting to register.** Without `chronos.Register(...)` in `init()` the CLI cannot find your adapter by name.
 - **Different feature lengths per row.** The engine assumes a stable feature dimensionality per scope. If your data sometimes has six features and sometimes seven, normalise to a canonical set before producing states.
-- **Outcome semantics drift.** If you change which feature is the outcome (or its direction), historical insights may misrepresent the new convention. Keep the contract stable for a given adapter.
+- **Outcome semantics drift.** If you change which feature is the outcome (or its direction), historical signals may misrepresent the new convention. Keep the contract stable for a given adapter.
 - **Including domain prose in `Meta`.** The engine does not render that string anywhere. Keep `Meta` small and structured; let the API layer handle copy.

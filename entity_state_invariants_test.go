@@ -121,6 +121,25 @@ func TestValidate_ReportsIdentityBeforeNumerics(t *testing.T) {
 	}
 }
 
+func TestValidate_RejectsNilObservationID(t *testing.T) {
+	s := valid()
+	s.ID = uuid.Nil
+	if err := s.Validate(); !errors.Is(err, chronos.ErrMissingObservationID) {
+		t.Errorf("got %v, want ErrMissingObservationID", err)
+	}
+}
+
+// A nil observation ID is reported before a missing entity ID: every
+// observation must be addressable before we discuss what it observes.
+func TestValidate_ReportsObservationIDBeforeEntityID(t *testing.T) {
+	s := valid()
+	s.ID = uuid.Nil
+	s.EntityID = uuid.Nil
+	if err := s.Validate(); !errors.Is(err, chronos.ErrMissingObservationID) {
+		t.Errorf("got %v, want ErrMissingObservationID to take precedence", err)
+	}
+}
+
 // The existing invariants must keep working; this suite adds to the
 // contract rather than replacing it.
 func TestValidate_PreexistingInvariantsHold(t *testing.T) {

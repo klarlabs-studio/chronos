@@ -6,6 +6,8 @@ This document describes the engine's layout, the contracts at each boundary, and
 
 Chronos is the **Time / Pattern Perception** layer of the cognitive stack. It accepts time-series observations from any domain via an adapter, runs them through a fan-out of detectors, and emits structured signals.
 
+The full Intent — principles, detector acceptance criteria, hardening priorities, and non-goals — lives in [`intent.md`](intent.md). Temporal ordering and duplicate semantics are in [`temporal-contract.md`](temporal-contract.md).
+
 Two design rules everything else follows:
 
 1. **Signals, not opinions.** Chronos perceives; agent runtimes and other downstream consumers interpret. There is no Title/Summary/Suggestion, no dismissal, no feedback. Domain types carry only structured perception.

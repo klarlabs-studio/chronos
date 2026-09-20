@@ -8,6 +8,8 @@ The single hardest rule: **signals, not opinions.** Chronos perceives; it does n
 
 The second hardest rule: **the core engine knows nothing about the domain.** Athletes, servers, sensors — all enter through `chronos.Source` as undifferentiated `EntityState` records.
 
+Full Intent (principles, detector acceptance criteria, hardening priorities, non-goals): [`docs/intent.md`](docs/intent.md). Temporal semantics: [`docs/temporal-contract.md`](docs/temporal-contract.md).
+
 ## Architecture
 
 ```
@@ -34,7 +36,8 @@ internal/
     mysql/                     MySQL / MariaDB backend
     libsql/                    Turso / local libSQL (reuses sqlite repos)
 sql/sqlite/                    sqlc query file
-docs/                          Architecture, cognitive-stack, adapter authoring, configuration
+docs/                          Intent, temporal contract, architecture, cognitive-stack,
+                               adapter authoring, configuration, wire contract
 ```
 
 ## Public surface

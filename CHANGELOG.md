@@ -6,7 +6,25 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Added
+- **[`docs/intent.md`](docs/intent.md)** — authoritative product Intent:
+  signals-not-opinions, shape-not-state, input invariants, temporal
+  semantics, numerical robustness, explainability, confidence semantics,
+  storage-as-infrastructure, first-class embedding, wire contracts as
+  public API, detector acceptance criteria, and hardening priorities.
+- **[`docs/temporal-contract.md`](docs/temporal-contract.md)** —
+  deterministic behaviour for observation IDs, timestamps, ordering,
+  duplicate IDs/timestamps, sparse/irregular series, and signal immutability.
+
 ### Changed
+- **BREAKING for embedded callers: `EntityState.Validate` rejects a nil
+  observation ID** (`ErrMissingObservationID`). Observation ID is the
+  persistence idempotency key; leaving it nil collapsed every such write
+  onto one row. HTTP, gRPC and MCP already mint a UUID when the wire
+  omits `id`. Callers constructing an `EntityState` directly (including
+  `embed.Engine.Process`) must set `ID` — typically `uuid.New()`.
+- Package and adapter docs drop residual “insight” vocabulary in favour
+  of Observation → Detection → Signal, matching the Intent.
 - **Spike and Drop derive Confidence from the quality of the evidence
   instead of copying Strength.** This changes the confidence number
   emitted for every spike and drop signal, so it wants a minor version
