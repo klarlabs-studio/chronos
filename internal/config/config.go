@@ -146,6 +146,11 @@ type Config struct {
 	// process, so restarting reclaims nothing. Long-lived deployments
 	// should set this.
 	SignalRetention time.Duration
+
+	// RetentionSweepInterval is how often the retention sweep runs.
+	// It bounds the overshoot: the store holds up to this much data
+	// beyond the retention window between sweeps.
+	RetentionSweepInterval time.Duration
 }
 
 // defaultDetectionLookback bounds a detection tick's history load when
@@ -172,6 +177,27 @@ type Config struct {
 // this deliberately, having done the arithmetic above, rather than
 // inherit a default that assumes its data is small.
 const defaultDetectionLookback = 24 * time.Hour
+
+// defaultRetentionSweepInterval is how often retention runs when
+// CHRONOS_RETENTION_SWEEP_INTERVAL is unset.
+//
+// Five minutes, not an hour. The interval IS the overshoot: whatever
+// ages out between sweeps is still on disk, so an hourly sweep holds up
+// to an hour of data beyond the retention window. On a deployment
+// producing 2,430 signals/hour at ~716 evidence rows each that is about
+// 245 MB of slack; at five minutes it is about 20 MB.
+//
+// It also scales wrongly against short windows. An operator who sets
+// CHRONOS_SIGNAL_RETENTION=1h and sweeps hourly can hold two hours --
+// the overshoot is 100% of the window. The sweep interval has to be
+// small relative to the retention it enforces, and an hour is not small
+// relative to anything an incident engine is likely to configure.
+//
+// Hourly was justified by a DELETE that no longer exists: it was
+// table-wide and unbounded, so running it often was genuinely wasteful.
+// The delete is now bounded and indexed, so a sweep with nothing to do
+// is a probe that returns zero rows.
+const defaultRetentionSweepInterval = 5 * time.Minute
 
 // Default returns sensible defaults.
 func Default() *Config {
@@ -235,9 +261,10 @@ func Default() *Config {
 		WebhookTimeout: defaultEnvDuration("CHRONOS_WEBHOOK_TIMEOUT", 5*time.Second),
 		WebhookRetries: defaultEnvInt("CHRONOS_WEBHOOK_RETRIES", 1),
 
-		DetectionInterval: defaultEnvDuration("CHRONOS_DETECTION_INTERVAL", 0),
-		DetectionLookback: defaultEnvDuration("CHRONOS_DETECTION_LOOKBACK", defaultDetectionLookback),
-		SignalRetention:   defaultEnvDuration("CHRONOS_SIGNAL_RETENTION", 0),
+		DetectionInterval:      defaultEnvDuration("CHRONOS_DETECTION_INTERVAL", 0),
+		DetectionLookback:      defaultEnvDuration("CHRONOS_DETECTION_LOOKBACK", defaultDetectionLookback),
+		SignalRetention:        defaultEnvDuration("CHRONOS_SIGNAL_RETENTION", 0),
+		RetentionSweepInterval: defaultEnvDuration("CHRONOS_RETENTION_SWEEP_INTERVAL", defaultRetentionSweepInterval),
 	}
 }
 

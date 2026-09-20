@@ -26,13 +26,14 @@ import (
 // signal with the same (scope, series, pattern, window) already
 // exists, so unchanged data does not append duplicate rows.
 type Scheduler struct {
-	states    ports.EntityStateRepository
-	signals   ports.SignalRepository
-	engine    *detect.Engine
-	interval  time.Duration
-	retention time.Duration
-	lookback  time.Duration
-	logger    *slog.Logger
+	states        ports.EntityStateRepository
+	signals       ports.SignalRepository
+	engine        *detect.Engine
+	interval      time.Duration
+	retention     time.Duration
+	lookback      time.Duration
+	sweepInterval time.Duration
+	logger        *slog.Logger
 }
 
 // NewScheduler builds a scheduler. interval == 0 produces a scheduler
@@ -77,6 +78,19 @@ func (s *Scheduler) WithRetention(d time.Duration) *Scheduler {
 // A setter for the same reason as WithRetention -- the constructor
 // already takes a time.Duration, and three adjacent durations are three
 // arguments a caller can transpose without the compiler noticing.
+// WithSweepInterval sets how often retention runs, and returns the
+// scheduler for chaining. Zero or negative falls back to the package
+// default.
+//
+// The interval is the overshoot: whatever ages out between sweeps is
+// still on disk. It should stay small relative to the retention window
+// it enforces -- sweeping hourly against a one-hour retention holds two
+// hours.
+func (s *Scheduler) WithSweepInterval(d time.Duration) *Scheduler {
+	s.sweepInterval = d
+	return s
+}
+
 func (s *Scheduler) WithLookback(d time.Duration) *Scheduler {
 	s.lookback = d
 	return s
@@ -145,7 +159,11 @@ func (s *Scheduler) retain(ctx context.Context) {
 	// A far slower clock than detection. Tying retention to the
 	// detection interval would issue a DELETE every few seconds to
 	// reclaim the handful of rows that aged out since the last one.
-	sweeps := time.NewTicker(retentionSweepInterval)
+	every := s.sweepInterval
+	if every <= 0 {
+		every = retentionSweepInterval
+	}
+	sweeps := time.NewTicker(every)
 	defer sweeps.Stop()
 
 	s.sweep(ctx)
@@ -161,7 +179,7 @@ func (s *Scheduler) retain(ctx context.Context) {
 
 // retentionSweepInterval is how often Run prunes the signals table when
 // retention is configured.
-const retentionSweepInterval = time.Hour
+const retentionSweepInterval = 5 * time.Minute
 
 // retentionBatchSize bounds one retention DELETE, counted in signals.
 //

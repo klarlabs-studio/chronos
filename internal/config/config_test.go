@@ -228,3 +228,17 @@ func TestDefault_DetectionLookbackIsBoundedAndSane(t *testing.T) {
 		t.Errorf("default lookback yields only %d points at a 5m cadence; too few for the detectors", pts)
 	}
 }
+
+// The sweep interval IS the overshoot: whatever ages out between sweeps
+// is still on disk. It must stay small relative to any retention window
+// an operator is likely to set — an hourly sweep against a one-hour
+// retention holds two hours, which is 100% slack.
+func TestDefault_RetentionSweepIntervalIsSmall(t *testing.T) {
+	c := Default()
+	if c.RetentionSweepInterval <= 0 {
+		t.Fatalf("RetentionSweepInterval = %v; a non-positive interval disables retention silently", c.RetentionSweepInterval)
+	}
+	if c.RetentionSweepInterval > 15*time.Minute {
+		t.Errorf("RetentionSweepInterval = %v; too coarse — it bounds how far past the retention window the store can grow", c.RetentionSweepInterval)
+	}
+}

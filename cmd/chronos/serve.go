@@ -165,7 +165,8 @@ func runServe(args []string) error {
 	if cfg.DetectionInterval > 0 {
 		sched := pipeline.NewScheduler(conn.EntityStates, signals, pipeline.NewEngine(cfg).WithMetrics(metrics), cfg.DetectionInterval, logger).
 			WithRetention(cfg.SignalRetention).
-			WithLookback(cfg.DetectionLookback)
+			WithLookback(cfg.DetectionLookback).
+			WithSweepInterval(cfg.RetentionSweepInterval)
 		go func() {
 			if err := sched.Run(rootCtx); err != nil {
 				logger.Error("scheduler exited with error", "err", err)
@@ -192,6 +193,7 @@ func runServe(args []string) error {
 	logger.Info("listening", "addr", addr, "store", storeKind(dsn),
 		"detection_interval", cfg.DetectionInterval, "detection_lookback", cfg.DetectionLookback,
 		"signal_retention", cfg.SignalRetention,
+		"retention_sweep_interval", cfg.RetentionSweepInterval,
 		"webhooks", len(cfg.WebhookURLs),
 		"grpc_port", cfg.GRPCPort)
 	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
