@@ -51,6 +51,7 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_WEBHOOK_RETRIES` | `1` | both | Best-effort retries on 5xx. No retry on 2xx or 4xx. |
 | `CHRONOS_DETECTION_INTERVAL` | `0` | `serve` | Background detection cadence; `0` disables. Required for SSE to receive signals. |
 | `CHRONOS_DETECTION_LOOKBACK` | `24h` | `serve` | How much history each detection tick loads per scope. Bounds a tick's memory; see below. |
+| `CHRONOS_RETENTION_SWEEP_INTERVAL` | `5m` | `serve` | How often retention runs. This is the overshoot — see below. |
 | `CHRONOS_SIGNAL_RETENTION` | `0` | `serve` | Delete signals detected longer ago than this; `0` keeps them forever. Set it on any long-running scheduler — see below. |
 | `CHRONOS_VERBOSE` | unset | CLI | When set to any non-empty value, prints the cause chain on errors. |
 
@@ -189,6 +190,10 @@ Detectors only ever consult their own analysis window, so history older than the
 | `6h` | ~64 MiB |
 
 The default is deliberately conservative. It shipped once at `168h`, sized for weekly seasonality, and OOM-killed the deployment it was written for on the first tick. **Weekly seasonality does not resolve inside 24h** — if you need it, raise this having done the arithmetic above, rather than assuming the default already accounts for your data. Set it to the longest window any enabled detector needs: seasonality needs more than one cycle of the rhythm it is looking for, which is what the `168h` default is sized for. Shorter is cheaper, and the cost is linear in the window.
+
+**The sweep interval is the overshoot.** Whatever ages out between sweeps is still on disk, so the store holds up to `CHRONOS_RETENTION_SWEEP_INTERVAL` of data beyond the retention window. Keep it small relative to the window it enforces: sweeping hourly against `CHRONOS_SIGNAL_RETENTION=1h` holds two hours. On a fleet producing 2,430 signals/hour at ~716 evidence rows each, an hourly sweep is ~245 MB of slack and a five-minute sweep is ~20 MB.
+
+Frequent sweeps are cheap. The delete is bounded and indexed, so a sweep with nothing to do is a probe returning zero rows, and retention runs on its own goroutine — it cannot delay detection however long it takes.
 
 Retention is a store capability, not a requirement. If the configured backend cannot prune, the scheduler logs an error on every sweep rather than quietly doing nothing.
 

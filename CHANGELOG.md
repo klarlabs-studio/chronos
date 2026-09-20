@@ -4,6 +4,31 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [0.16.0] - 2026-09-20
+
+### Added
+- **`CHRONOS_RETENTION_SWEEP_INTERVAL`**, defaulting to **`5m`** where the
+  sweep cadence was previously a hard-coded hour.
+
+  The interval *is* the overshoot: whatever ages out between sweeps is
+  still on disk, so an hourly sweep holds up to an hour of data beyond
+  the retention window. On a fleet producing 2,430 signals/hour at ~716
+  evidence rows each that is ~245 MB of slack, against ~20 MB at five
+  minutes.
+
+  It also scaled wrongly against short windows. `CHRONOS_SIGNAL_RETENTION=1h`
+  swept hourly holds two hours — the overshoot is 100% of the window. An
+  hour is not small relative to anything an incident engine is likely to
+  configure.
+
+  The hourly cadence was justified by a DELETE that no longer exists: it
+  was table-wide and unbounded, so running it often was genuinely
+  wasteful. Since 0.14.0 the delete is bounded and indexed, and since
+  0.15.0 retention runs off the detection goroutine — so a sweep with
+  nothing to do is a probe returning zero rows, and one with work to do
+  cannot delay a tick. The reason for the hour was removed by those two
+  changes without the hour being revisited.
+
 ## [0.15.0] - 2026-09-20
 
 ### Fixed
