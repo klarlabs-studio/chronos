@@ -69,7 +69,7 @@ CLI flags > environment variables > defaults baked into `internal/config/config.
 
 ## Tuning detectors
 
-Each detector has its own knob namespace (`CHRONOS_<DETECTOR>_*`) so you can tune one without affecting others. All eleven detectors in `DefaultDetectors` / `DefaultCrossScopeDetectors` are live; set a detector's min-points / threshold knobs out of range to effectively disable it (the detector returns no signals).
+Each detector has its own knob namespace (`CHRONOS_<DETECTOR>_*`) so you can tune one without affecting others. All fourteen detectors in `DefaultDetectors` / `DefaultCrossScopeDetectors` are live; set a detector's min-points / threshold knobs out of range to effectively disable it (the detector returns no signals).
 
 - **Recurrence** (`SIM_THRESHOLD`, `MIN_SAMPLE`) — raise threshold for fewer, more specific peers; lower it for more candidates. Below ~0.7 admits noise. `MIN_SAMPLE` of 2 is the smallest defensible value; five is the saturation point of the confidence sample-factor.
 - **Trend / Spike / Drop / Stall** thresholds influence trigger sensitivity; smaller windows react faster but produce more noise.

@@ -16,7 +16,7 @@ The authoritative product Intent — principles, detector acceptance criteria, a
 
 **Hardening (Intent P0 / P1).**
 - `EntityState.Validate` rejects nil observation ID, nil entity/scope, zero timestamp, non-finite features, and blank labels.
-- Adversarial numerical coverage for all eleven detectors (`internal/detect/adversarial_test.go`).
+- Adversarial numerical coverage for all fourteen detectors (`internal/detect/adversarial_test.go`).
 - Storage backend conformance suite (`internal/store/conformance`) run by memory, SQLite, libSQL, Postgres, and MySQL.
 - Temporal contract documented in [`docs/temporal-contract.md`](docs/temporal-contract.md).
 
@@ -43,36 +43,28 @@ The authoritative product Intent — principles, detector acceptance criteria, a
 
 ## Next
 
-Shipped items from earlier roadmap slices stay checked in git history; they are no longer open work. Remaining scope:
+Shipped Intent hardening and the shape-catalog detectors are on `main`
+(#90–#92). Remaining Chronos-side scope is thin:
 
-### 1. Intent P2 — contract consistency
+### 1. Contract consistency (ongoing)
 
-Keep README, package comments, ADRs, CI claims, and [`docs/wire-contract.md`](docs/wire-contract.md) aligned with executable behavior. Treat documentation drift as a defect. Prefer Observation → Detection → Signal language; do not reintroduce “insight / alert / recommendation” vocabulary in engine docs. Ongoing maintenance — not a discrete open feature.
+Keep README, package comments, ADRs, CI claims, and
+[`docs/wire-contract.md`](docs/wire-contract.md) aligned with executable
+behavior. Treat documentation drift as a defect. Prefer Observation →
+Detection → Signal language.
 
-### 2. Intent P2 — embeddability
+### 2. Capability ports (deferred)
 
-Injectable `chronos.Registry`, injectable `store.Registry`
-(`Clone` / `embed.WithStoreRegistry`), and `cmd/chronos compute`
-dogfooding of `embed.Engine` are shipped. See
-[`docs/adr/0001-embeddable-engine-api.md`](docs/adr/0001-embeddable-engine-api.md).
+`ports.TextSearcher` and `ports.VectorSearcher` remain unused. Implement
+them only when a detector actually needs FTS or embeddings (Intent:
+statistical methods remain the default).
 
-### 3. Capability ports
+### 3. Further detectors
 
-`ports.TextSearcher` and `ports.VectorSearcher` remain unused. Implement them only when a detector actually needs FTS or embeddings (Intent: statistical methods remain the default).
-
-### 4. Adapter ecosystem (community-driven)
-
-The point of the no-adapters-in-Chronos rule is that adapters live close to their domain. Anticipated near-term integrations from neighbouring projects:
-
-- **Mnemos action+outcome stream** — feed Mnemos's recorded outcomes into Chronos as a metric series; pattern detection on the outcome.
-- **decisionkit risk score over time** — feed [decisionkit](https://github.com/felixgeelhaar/decisionkit) risk-score time series; detect "risk piling up" patterns. (Nous owned this when it was a live service; it is archived.)
-
-Both are out-of-tree adapters. This roadmap tracks them only as expected use cases — implementation belongs to the consuming repo.
-
-### 5. New detectors
-
-Oscillation, Divergence, and Convergence shipped (Intent shape catalog).
-Further candidates must meet the [detector acceptance criteria](docs/intent.md#detector-acceptance-criteria). “No signal” under degenerate input is required. Plateaus are covered by Stall.
+Any new pattern must meet the
+[detector acceptance criteria](docs/intent.md#detector-acceptance-criteria).
+“No signal” under degenerate input is required. Plateaus are covered by
+Stall; Oscillation / Divergence / Convergence are shipped.
 
 ## Non-goals
 

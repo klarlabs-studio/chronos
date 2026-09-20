@@ -70,9 +70,10 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **Anomaly skips zero-norm (and length-mismatched) feature vectors** —
   cosine similarity against a directionless vector is undefined, not
   “maximally isolated”.
-- **Recurrence skips zero-norm and length-mismatched peer vectors** —
-  same fail-closed rule as Anomaly; Cosine returning 0 is not treated
-  as evidence of dissimilarity.
+- **Adversarial coverage extended to Oscillation, Divergence, and
+  Convergence** — shared single-series matrix plus dedicated tables;
+  huge / denormal / below-floor cases must stay silent or emit
+  Validate-clean signals.
 - **OutlierCluster ignores denormal absolute deviations** off a
   zero-variance baseline and derives Confidence as
   `strength × sampleFactor`, not `strength + 0.3`.

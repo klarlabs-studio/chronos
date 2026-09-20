@@ -265,6 +265,9 @@ func TestAdversarial_EveryPerSeriesDetector(t *testing.T) {
 		"recurrence":      func(c *config.Config) Detector { return NewRecurrence(c) },
 		"anomaly":         func(c *config.Config) Detector { return NewAnomaly(c) },
 		"outlier_cluster": func(c *config.Config) Detector { return NewOutlierCluster(c) },
+		"oscillation":     func(c *config.Config) Detector { return NewOscillation(c) },
+		"divergence":      func(c *config.Config) Detector { return NewDivergence(c) },
+		"convergence":     func(c *config.Config) Detector { return NewConvergence(c) },
 	}
 	for name, ctor := range detectors {
 		advRunSingleSeries(t, name, ctor)
@@ -558,6 +561,116 @@ func TestCorrelation_Adversarial(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			d := NewCorrelation(advCfg())
+			ea, eb := uuid.New(), uuid.New()
+			states := append(advSeries(scope, ea, time.Minute, tc.a), advSeries(scope, eb, time.Minute, tc.b)...)
+			got := d.Detect(context.Background(), scope, states)
+			if len(got) != tc.want {
+				t.Fatalf("got %d signals, want %d (%s)", len(got), tc.want, tc.why)
+			}
+			advAssertSane(t, got)
+		})
+	}
+}
+
+// --- Oscillation -----------------------------------------------------------
+
+func TestOscillation_Adversarial(t *testing.T) {
+	scope := uuid.New()
+	zigzag := []float64{1, 5, 1, 5, 1, 5, 1, 5}
+	tests := []struct {
+		name string
+		ys   []float64
+		want int
+		why  string
+	}{
+		{"constant series", advConst(7, 12), 0,
+			"no meaningful differences → no flips"},
+		{"monotone ramp", advRamp(12, 1, 1), 0,
+			"every consecutive diff keeps the same sign"},
+		{"one below minimum", []float64{1, 5, 1}, 0,
+			"OscillationMinPoints is 6"},
+		{"exactly at minimum zigzag", []float64{1, 5, 1, 5, 1, 5}, 1,
+			"six points is the documented floor and a clean zigzag must emit"},
+		{"clean zigzag", zigzag, 1,
+			"every meaningful consecutive pair flips sign"},
+		{"huge zigzag", []float64{advHuge, -advHuge, advHuge, -advHuge, advHuge, -advHuge, advHuge, -advHuge}, 1,
+			"±MaxFloat64 still produces finite flip-rate evidence; Strength/Confidence must stay in [0,1]"},
+		{"denormal zigzag", []float64{advDenormal, 2 * advDenormal, advDenormal, 2 * advDenormal, advDenormal, 2 * advDenormal, advDenormal, 2 * advDenormal}, 0,
+			"subnormal swings are below the meaningful-deviation floor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewOscillation(advCfg())
+			got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, tc.ys))
+			if len(got) != tc.want {
+				t.Fatalf("got %d signals, want %d (%s)", len(got), tc.want, tc.why)
+			}
+			advAssertSane(t, got)
+		})
+	}
+}
+
+// --- Divergence / Convergence ---------------------------------------------
+
+func TestDivergence_Adversarial(t *testing.T) {
+	scope := uuid.New()
+	tests := []struct {
+		name string
+		a, b []float64
+		want int
+		why  string
+	}{
+		{"both constant", advConst(5, 8), advConst(9, 8), 0,
+			"constant gap → slope 0"},
+		{"parallel ramps", advRamp(8, 1, 1), advRamp(8, 2, 1), 0,
+			"constant gap of 1 → slope 0"},
+		{"growing gap", advConst(0, 8), advRamp(8, 1, 1), 1,
+			"flat vs rising: |a−b| grows by 1 per step"},
+		{"one below minimum", advConst(0, 4), advRamp(4, 1, 1), 0,
+			"DivergenceMinPoints is 5"},
+		{"exactly at minimum", advConst(0, 5), advRamp(5, 1, 1), 1,
+			"five aligned observations is the documented floor"},
+		{"both huge constants", advConst(advHuge, 8), advConst(advHuge/2, 8), 0,
+			"unrepresentable magnitudes: gap OLS must fail closed"},
+		{"both denormal ramps", []float64{advDenormal, 2 * advDenormal, 3 * advDenormal, 4 * advDenormal, 5 * advDenormal, 6 * advDenormal}, []float64{0, 0, 0, 0, 0, 0}, 0,
+			"subnormal gap growth is below DivergenceMinSlope"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewDivergence(advCfg())
+			ea, eb := uuid.New(), uuid.New()
+			states := append(advSeries(scope, ea, time.Minute, tc.a), advSeries(scope, eb, time.Minute, tc.b)...)
+			got := d.Detect(context.Background(), scope, states)
+			if len(got) != tc.want {
+				t.Fatalf("got %d signals, want %d (%s)", len(got), tc.want, tc.why)
+			}
+			advAssertSane(t, got)
+		})
+	}
+}
+
+func TestConvergence_Adversarial(t *testing.T) {
+	scope := uuid.New()
+	tests := []struct {
+		name string
+		a, b []float64
+		want int
+		why  string
+	}{
+		{"both constant", advConst(5, 8), advConst(9, 8), 0,
+			"constant gap → slope 0"},
+		{"shrinking gap", advConst(0, 8), []float64{10, 8, 6, 4, 2, 1, 0.5, 0}, 1,
+			"flat vs descending-toward-zero: |a−b| shrinks"},
+		{"growing gap no signal", advConst(0, 8), advRamp(8, 1, 1), 0,
+			"Divergence territory — Convergence must stay silent"},
+		{"one below minimum", advConst(0, 4), []float64{4, 3, 2, 1}, 0,
+			"ConvergenceMinPoints is 5"},
+		{"exactly at minimum", advConst(0, 5), []float64{8, 6, 4, 2, 0}, 1,
+			"five aligned observations is the documented floor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := NewConvergence(advCfg())
 			ea, eb := uuid.New(), uuid.New()
 			states := append(advSeries(scope, ea, time.Minute, tc.a), advSeries(scope, eb, time.Minute, tc.b)...)
 			got := d.Detect(context.Background(), scope, states)
@@ -1015,6 +1128,7 @@ func TestFinding_DetectorsRequireChronologicalInput(t *testing.T) {
 
 	detectors := []Detector{
 		NewTrend(advCfg()), NewStall(advCfg()), NewChangePoint(advCfg()), NewSeasonality(advCfg()),
+		NewOscillation(advCfg()),
 	}
 	for _, d := range detectors {
 		got := d.Detect(context.Background(), scope, descending)
