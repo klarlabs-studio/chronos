@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -295,6 +296,7 @@ func TestScheduler_SweepIsNoopWithoutRetention(t *testing.T) {
 // means it stays a valid EntityStateRepository as that interface grows.
 type recordingStates struct {
 	ports.EntityStateRepository
+	mu        sync.Mutex
 	unbounded int
 	bounded   int
 	cutoff    time.Time
@@ -306,9 +308,18 @@ func (r *recordingStates) ListByScope(ctx context.Context, scopeID uuid.UUID) ([
 }
 
 func (r *recordingStates) ListByScopeSince(ctx context.Context, scopeID uuid.UUID, cutoff time.Time) ([]chronos.EntityState, error) {
+	r.mu.Lock()
 	r.bounded++
 	r.cutoff = cutoff
+	r.mu.Unlock()
 	return r.EntityStateRepository.ListByScopeSince(ctx, scopeID, cutoff)
+}
+
+// boundedCalls reads the counter under the lock, for the concurrent test.
+func (r *recordingStates) boundedCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bounded
 }
 
 // A tick must never issue an unbounded scope load. ListByScope has no
@@ -445,5 +456,82 @@ func TestScheduler_SweepStopsOnCancel(t *testing.T) {
 
 	if len(rec.limits) > 2 {
 		t.Errorf("sweep issued %d batches against a cancelled context; it should stop at the first boundary", len(rec.limits))
+	}
+}
+
+// blockingRetainer stalls inside retention until released.
+type blockingRetainer struct {
+	ports.SignalRepository
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingRetainer) DeleteSignalsOlderThan(_ context.Context, _ time.Time, _ int) (int64, error) {
+	b.once.Do(func() { close(b.entered) })
+	<-b.release
+	return 0, nil
+}
+
+// A slow retention sweep must not stop detection.
+//
+// Retention used to run inline in the same goroutine as the ticker —
+// once before the loop and again on a second ticker in the same select —
+// so a sweep that took minutes produced minutes with no detections. On a
+// deployment where each signal carries ~716 cascading evidence rows, one
+// batch spent 23 minutes in IO/DataFileRead without committing and the
+// engine detected nothing for the whole of it. Cancelling the delete
+// restored detection within seconds.
+//
+// The two have nothing to say to each other: one reads observations, the
+// other deletes aged signals. This pins them apart.
+func TestScheduler_SlowRetentionDoesNotBlockDetection(t *testing.T) {
+	cfg := config.Default()
+	mem := memory.New()
+	ctx := context.Background()
+
+	scope := uuid.New()
+	if err := mem.EntityStates.Ingest(ctx, "test", chronos.EntityState{
+		ID: uuid.New(), EntityID: uuid.New(), ScopeID: scope,
+		Timestamp: time.Now(), Features: []float64{1, 2},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	block := &blockingRetainer{
+		SignalRepository: mem.Signals,
+		entered:          make(chan struct{}),
+		release:          make(chan struct{}),
+	}
+	rec := &recordingStates{EntityStateRepository: mem.EntityStates}
+
+	s := NewScheduler(rec, block, detect.NewEngine(cfg), 10*time.Millisecond, nil).
+		WithRetention(time.Hour)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go func() { _ = s.Run(runCtx) }()
+
+	// Retention must actually be stuck before this proves anything.
+	select {
+	case <-block.entered:
+	case <-time.After(2 * time.Second):
+		close(block.release)
+		t.Fatal("retention sweep never started; the test proves nothing")
+	}
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			close(block.release)
+			t.Fatal("no detection tick completed while retention was stuck: the sweep is blocking the scheduler")
+		default:
+		}
+		if rec.boundedCalls() > 0 {
+			close(block.release)
+			return // a tick ran while retention was wedged
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

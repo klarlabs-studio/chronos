@@ -101,15 +101,29 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	t := time.NewTicker(s.interval)
 	defer t.Stop()
 
-	// Retention runs on its own, far slower clock. Tying it to the
-	// detection interval would issue a table-wide DELETE every few
-	// seconds to reclaim the handful of rows that aged out since the
-	// last one.
-	sweeps := time.NewTicker(retentionSweepInterval)
-	defer sweeps.Stop()
-
 	s.logger.Info("detection scheduler started", "interval", s.interval, "signal_retention", s.retention)
-	s.sweep(ctx)
+
+	// Retention runs on its own goroutine, not in this loop.
+	//
+	// It used to run inline — once before the loop, then on a second
+	// ticker inside the same select — which meant a slow sweep stopped
+	// detection entirely for as long as it took. That is not a
+	// theoretical cost: on a deployment where each signal carries ~716
+	// cascading evidence rows, a single batch of 1000 spent 23 minutes
+	// in IO/DataFileRead without committing, and the engine produced no
+	// detections at all for the whole of it. Cancelling the delete
+	// restored detection within seconds, which is how the coupling was
+	// found.
+	//
+	// The inline call also put the worst sweep — the first one, facing
+	// whatever accumulated before retention was switched on — directly
+	// in the startup path, so a restart looked like a hang.
+	//
+	// Detection and retention have nothing to say to each other: one
+	// reads observations, the other deletes aged signals. Only the
+	// shared goroutine coupled them.
+	go s.retain(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -117,6 +131,28 @@ func (s *Scheduler) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 			s.tick(ctx)
+		}
+	}
+}
+
+// retain sweeps expired signals on its own slow clock until ctx ends.
+// Runs as its own goroutine so that however long a sweep takes, it
+// cannot delay a detection tick.
+func (s *Scheduler) retain(ctx context.Context) {
+	if s.retention <= 0 {
+		return
+	}
+	// A far slower clock than detection. Tying retention to the
+	// detection interval would issue a DELETE every few seconds to
+	// reclaim the handful of rows that aged out since the last one.
+	sweeps := time.NewTicker(retentionSweepInterval)
+	defer sweeps.Stop()
+
+	s.sweep(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
 		case <-sweeps.C:
 			s.sweep(ctx)
 		}
@@ -127,10 +163,20 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // retention is configured.
 const retentionSweepInterval = time.Hour
 
-// retentionBatchSize bounds one retention DELETE. Small enough that a
-// batch commits quickly and WAL recycles; large enough that clearing a
-// multi-million-row backlog does not take thousands of round trips.
-const retentionBatchSize = 1000
+// retentionBatchSize bounds one retention DELETE, counted in signals.
+//
+// The number that matters is not this one but what it multiplies into:
+// evidence cascades per signal, and the engine cannot know the ratio. On
+// a deployment carrying ~716 evidence rows per signal, 1000 signals is
+// 716,000 cascaded row deletions — one such batch ran 23 minutes in
+// IO/DataFileRead without committing. 200 keeps the same deployment near
+// 143,000, which commits in seconds.
+//
+// Small batches cost round trips and nothing else: WAL recycles between
+// commits, so a batched sweep of any size moves free space not at all,
+// whereas one unbounded statement consumed ~64MB/min until it was
+// cancelled.
+const retentionBatchSize = 200
 
 // sweep deletes signals detected longer ago than the configured
 // retention, and does nothing at all when retention is disabled.
