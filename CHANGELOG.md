@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-20
+
 ### Added
 - **[`docs/intent.md`](docs/intent.md)** — authoritative product Intent:
   signals-not-opinions, shape-not-state, input invariants, temporal
