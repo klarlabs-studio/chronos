@@ -51,8 +51,20 @@ jobs:
       - name: Lint
         run: buf lint
 
-      - name: Breaking-change check (against main)
+      - name: Breaking-change check (against base)
         # Skip the breaking check ON main itself — there is nothing
         # to diff against on that branch. PRs still run it.
+        #
+        # actions/checkout for pull_request does not create a local
+        # `main` ref even with fetch-depth: 0, so `.git#branch=main`
+        # fails with "couldn't find remote ref main". Compare against
+        # the PR base SHA (already present in the fetched history) or
+        # fetch the base branch explicitly for non-PR events.
         if: github.ref != 'refs/heads/main'
-        run: buf breaking --against ".git#branch=main"
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            buf breaking --against ".git#ref=${{ github.event.pull_request.base.sha }}"
+          else
+            git fetch --no-tags origin main:main
+            buf breaking --against ".git#branch=main"
+          fi
