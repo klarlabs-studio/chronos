@@ -61,6 +61,18 @@ func openProvider(ctx context.Context, dsn string) (*store.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("libsql: sql.Open: %w", err)
 	}
+	if strings.HasPrefix(driverDSN, "file:") {
+		// Embedded local-file mode is SQLite on disk, and SQLite
+		// serialises writes: a second connection writing concurrently
+		// gets SQLITE_BUSY and the write is lost, not retried. The
+		// SQLite provider caps the pool at one connection for exactly
+		// this reason; the libSQL provider reuses that provider's
+		// repositories, so it has to reuse the constraint they were
+		// written under. Remote databases keep the default pool —
+		// there the server, not the file lock, arbitrates writes.
+		db.SetMaxOpenConns(1)
+		db.SetConnMaxLifetime(0)
+	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("libsql: ping: %w (dsn=%s)", err, redactDSN(driverDSN))

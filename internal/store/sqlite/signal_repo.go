@@ -198,8 +198,14 @@ func (r *SignalRepository) loadEvidence(ctx context.Context, id uuid.UUID) ([]do
 // buildListQuery composes the dynamic SELECT for SignalFilter. Order is
 // always (detected_at DESC, confidence DESC) so callers get newest +
 // strongest first; Limit is applied as the SQL LIMIT clause.
+//
+// The column list must stay in step with [scanSignal] and with Get's
+// GetSignalByID: a column selected by one read path and not the other
+// is silent, path-dependent data loss. explanation and confidence_class
+// were missing here while Get returned them, so a signal fetched by ID
+// carried its explanation and the same signal in a list did not.
 func buildListQuery(f ports.SignalFilter) (string, []any) {
-	const base = `SELECT id, scope_id, series_id, pattern, detected_at, window_start, window_end, strength, confidence, metrics FROM signals`
+	const base = `SELECT id, scope_id, series_id, pattern, detected_at, window_start, window_end, strength, confidence, metrics, explanation, confidence_class FROM signals`
 	where, args := buildWhere(f)
 	q := base + where + " ORDER BY detected_at DESC, confidence DESC"
 	if f.Limit > 0 {
@@ -264,6 +270,7 @@ func scanSignal(scan func(...any) error) (domain.Signal, error) {
 	if err := scan(
 		&row.ID, &row.ScopeID, &row.SeriesID, &row.Pattern, &row.DetectedAt,
 		&row.WindowStart, &row.WindowEnd, &row.Strength, &row.Confidence, &row.Metrics,
+		&row.Explanation, &row.ConfidenceClass,
 	); err != nil {
 		return domain.Signal{}, fmt.Errorf("scan signal: %w", err)
 	}

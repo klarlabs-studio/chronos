@@ -119,6 +119,17 @@ func parseDSN(dsn string) (dsnParts, error) {
 	}
 	q := u.Query()
 	q.Del("namespace")
+	// search_path travels in the DSN, not in a SET statement, because
+	// SET is a property of one session and *sql.DB is a pool of up to
+	// 25 of them. A SET issued at Open reaches whichever connection
+	// happened to serve it; every connection the pool opens later
+	// starts on the default search_path, where the namespace's tables
+	// are not visible, and the query fails with
+	// `relation "entity_states" does not exist`. Single-threaded use
+	// hides this because the pool keeps handing back the one warm
+	// connection. Passing search_path as a startup runtime parameter
+	// puts it on every connection the pool will ever open.
+	q.Set("search_path", ns)
 	u.RawQuery = q.Encode()
 	return dsnParts{Driver: u.String(), Namespace: ns}, nil
 }
@@ -164,16 +175,17 @@ func openWithNamespace(ctx context.Context, p dsnParts) (*Conn, error) {
 	return c, nil
 }
 
-// applyNamespace runs CREATE SCHEMA IF NOT EXISTS + SET search_path.
-// The schema name has already been validated against namespaceRE so
-// fmt-substitution is safe — Postgres identifiers are not parameter-
-// substitutable in CREATE SCHEMA / SET, so we cannot use a placeholder.
+// applyNamespace runs CREATE SCHEMA IF NOT EXISTS. The schema name has
+// already been validated against namespaceRE so fmt-substitution is
+// safe — Postgres identifiers are not parameter-substitutable in
+// CREATE SCHEMA, so we cannot use a placeholder.
+//
+// search_path is not set here: it is carried on every connection as a
+// startup parameter by parseDSN. A schema named in search_path need
+// not exist yet, so connecting before this runs is fine.
 func applyNamespace(ctx context.Context, db *sql.DB, ns string) error {
 	if _, err := db.ExecContext(ctx, fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", ns)); err != nil {
 		return fmt.Errorf("postgres: create schema %q: %w", ns, err)
-	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("SET search_path TO %s", ns)); err != nil {
-		return fmt.Errorf("postgres: set search_path %q: %w", ns, err)
 	}
 	return nil
 }

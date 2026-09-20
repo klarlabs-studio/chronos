@@ -163,6 +163,7 @@ func (r *SignalRepository) loadEvidence(ctx context.Context, id uuid.UUID) ([]do
 		if err := rows.Scan(&e.Series, &e.Time, &e.Kind, &e.Score, &metrics); err != nil {
 			return nil, fmt.Errorf("scan evidence: %w", err)
 		}
+		e.Time = e.Time.UTC()
 		if len(metrics) > 0 {
 			_ = json.Unmarshal(metrics, &e.Metrics)
 		}
@@ -262,6 +263,11 @@ func scanSignalRow(scan func(...any) error) (domain.Signal, error) {
 	); err != nil {
 		return domain.Signal{}, err
 	}
+	// pgx returns TIMESTAMPTZ in the client's local zone; every other
+	// backend returns UTC and so does this one. See scanEntityStates.
+	sig.DetectedAt = sig.DetectedAt.UTC()
+	sig.Window.Start = sig.Window.Start.UTC()
+	sig.Window.End = sig.Window.End.UTC()
 	sig.Pattern = domain.PatternType(patternStr)
 	if len(metricsJSON) > 0 {
 		_ = json.Unmarshal(metricsJSON, &sig.Metrics)
