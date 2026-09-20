@@ -21,7 +21,7 @@ CI (`.github/workflows/ci.yml`) runs `go test -race -count=1`, `golangci-lint`, 
 
 ## Project intent
 
-Chronos is the **Time / Pattern Perception** layer of the cognitive stack (Mnemos → Chronos → agent runtimes). It ingests time-series observations and emits structured **signals** — `Recurrence`, `Trend`, `Spike`, `Drop`, `Stall`, `Anomaly`, `Seasonality`, `Correlation`, `ChangePoint`, `OutlierCluster`, `CrossScopeCorrelation`. Each signal carries Pattern, Strength (intensity), Confidence (sureness), Window, Evidence, and Metrics.
+Chronos is the **Time / Pattern Perception** layer of the cognitive stack (Mnemos → Chronos → agent runtimes). It ingests time-series observations and emits structured **signals** — `Recurrence`, `Trend`, `Spike`, `Drop`, `Stall`, `Anomaly`, `Seasonality`, `Correlation`, `ChangePoint`, `OutlierCluster`, `CrossScopeCorrelation`, `Oscillation`, `Divergence`, `Convergence`. Each signal carries Pattern, Strength (intensity), Confidence (sureness), Window, Evidence, and Metrics.
 
 Two non-negotiable rules:
 
@@ -113,6 +113,12 @@ All env-var driven. Defaults in `config.Default()` (`internal/config/config.go`)
 | `CHRONOS_CROSS_SCOPE_MIN` | `0.8` | CrossScopeCorrelation: minimum \|r\| |
 | `CHRONOS_CROSS_SCOPE_MIN_POINTS` | `5` | CrossScopeCorrelation: minimum aligned observations |
 | `CHRONOS_ANONYMIZE_CROSS_SCOPE` | `false` | Hash scope/series ids on cross-scope signals |
+| `CHRONOS_OSCILLATION_MIN_FLIP_RATE` | `0.55` | Oscillation: minimum sign-flip rate |
+| `CHRONOS_OSCILLATION_MIN_POINTS` | `6` | Oscillation: minimum observations |
+| `CHRONOS_DIVERGENCE_MIN_SLOPE` | `0.05` | Divergence: minimum positive \|a−b\| slope per step |
+| `CHRONOS_DIVERGENCE_MIN_POINTS` | `5` | Divergence: minimum aligned observations |
+| `CHRONOS_CONVERGENCE_MIN_SLOPE` | `0.05` | Convergence: minimum \|negative\| \|a−b\| slope |
+| `CHRONOS_CONVERGENCE_MIN_POINTS` | `5` | Convergence: minimum aligned observations |
 | `CHRONOS_CONFIDENCE_ESTABLISHED` | `2.0` | MIN_POINTS multiplier for `established` |
 | `CHRONOS_CONFIDENCE_STRONG` | `5.0` | MIN_POINTS multiplier for `strong` |
 | `CHRONOS_DETECTOR_PARALLELISM` | `false` | Parallel per-scope detectors |

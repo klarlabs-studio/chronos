@@ -86,6 +86,12 @@ func TestDeterminism_PerSeriesDetectorsEmitInStableOrder(t *testing.T) {
 			detCohort(scope, 6, advRamp(12, 1, 1)), 15}, // 6 choose 2
 		{"outlier_cluster", func(c *config.Config) Detector { return NewOutlierCluster(c) },
 			detOutlierMultiBucket(scope, 5), 2},
+		{"oscillation", func(c *config.Config) Detector { return NewOscillation(c) },
+			detCohort(scope, 8, []float64{1, 5, 1, 5, 1, 5, 1, 5}), 8},
+		{"divergence", func(c *config.Config) Detector { return NewDivergence(c) },
+			detDivergingCohort(scope, 6), 15}, // 6 choose 2
+		{"convergence", func(c *config.Config) Detector { return NewConvergence(c) },
+			detConvergingCohort(scope, 6), 15},
 	}
 
 	for _, tc := range tests {
@@ -119,6 +125,43 @@ func detOutlierMultiBucket(scope uuid.UUID, n int) []chronos.EntityState {
 		}
 		out = append(out, first...)
 		out = append(out, second...)
+	}
+	return out
+}
+
+// detDivergingCohort builds n series that all diverge from a flat
+// baseline partner so every pair emits a Divergence signal.
+// Pair (0, i) for i>0: series 0 is flat zeros; series i rises with
+// slope proportional to i — every pair among rising series also
+// diverges from each other when slopes differ. Simpler: one flat
+// baseline + (n-1) identical rising series → C(n,2) pairs that all
+// have growing gaps only between flat and rising; pairs among rising
+// have constant gap. So use uniquely sloping series: series i has
+// outcomes k*(i+1) for k in 0..11 so every pair diverges.
+func detDivergingCohort(scope uuid.UUID, n int) []chronos.EntityState {
+	var out []chronos.EntityState
+	for i := 0; i < n; i++ {
+		ys := make([]float64, 12)
+		for k := range ys {
+			ys[k] = float64(k * (i + 1))
+		}
+		out = append(out, advSeries(scope, uuid.New(), time.Minute, ys)...)
+	}
+	return out
+}
+
+// detConvergingCohort builds n series that all converge toward zero
+// from distinct starting gaps so every pair's absolute gap shrinks.
+func detConvergingCohort(scope uuid.UUID, n int) []chronos.EntityState {
+	var out []chronos.EntityState
+	for i := 0; i < n; i++ {
+		start := float64((i + 1) * 10)
+		ys := make([]float64, 12)
+		for k := range ys {
+			// Linearly approach 0: start * (11-k)/11
+			ys[k] = start * float64(11-k) / 11
+		}
+		out = append(out, advSeries(scope, uuid.New(), time.Minute, ys)...)
 	}
 	return out
 }

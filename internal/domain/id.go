@@ -17,14 +17,15 @@ var perceptionNS = uuid.NewSHA1(uuid.NameSpaceURL, []byte("https://github.com/fe
 // overwrites it with this value so a second detect run over the same
 // window upserts rather than inserting a duplicate row.
 //
-// Pairwise patterns (correlation, cross_scope_correlation) include
-// the partner series from Evidence[0] so two pairs that share a
-// window do not collide. Growing window.End produces a new id — that
-// is a new perception, not an in-place mutation.
+// Pairwise patterns (correlation, cross_scope_correlation, divergence,
+// convergence) include the partner series from Evidence[0] so two pairs
+// that share a window do not collide. Growing window.End produces a
+// new id — that is a new perception, not an in-place mutation.
 func PerceptionID(s Signal) uuid.UUID {
 	partner := uuid.Nil
 	switch s.Pattern {
-	case PatternTypeCorrelation, PatternTypeCrossScopeCorrelation:
+	case PatternTypeCorrelation, PatternTypeCrossScopeCorrelation,
+		PatternTypeDivergence, PatternTypeConvergence:
 		if len(s.Evidence) > 0 {
 			partner = s.Evidence[0].Series
 		}

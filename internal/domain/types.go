@@ -109,6 +109,19 @@ const (
 	// move together. The within-scope correlation detector misses these
 	// because it groups by scope; this detector looks across scopes.
 	PatternTypeCrossScopeCorrelation PatternType = "cross_scope_correlation"
+
+	// PatternTypeOscillation — the outcome repeatedly reverses direction
+	// (high sign-flip rate among successive differences). Distinct from
+	// Seasonality, which requires a periodic autocorrelation peak.
+	PatternTypeOscillation PatternType = "oscillation"
+
+	// PatternTypeDivergence — two series in the same scope whose
+	// absolute outcome gap is growing over the aligned window.
+	PatternTypeDivergence PatternType = "divergence"
+
+	// PatternTypeConvergence — two series in the same scope whose
+	// absolute outcome gap is shrinking over the aligned window.
+	PatternTypeConvergence PatternType = "convergence"
 )
 
 // TimeWindow describes the analysis window over which a signal was

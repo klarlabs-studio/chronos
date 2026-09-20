@@ -88,6 +88,16 @@ type Config struct {
 	CrossScopeMin       float64 // Minimum |Pearson r| to emit (cross-scope tightness)
 	CrossScopeMinPoints int     // Minimum aligned observations between two series
 
+	// Detection — Oscillation (sign-flip rate among first differences)
+	OscillationMinFlipRate float64 // Minimum flip rate in [0, 1] to emit
+	OscillationMinPoints   int     // Minimum observations
+
+	// Detection — Divergence / Convergence (OLS slope of |a−b|)
+	DivergenceMinSlope   float64 // Minimum positive gap slope (outcome units per step)
+	DivergenceMinPoints  int     // Minimum aligned observations
+	ConvergenceMinSlope  float64 // Minimum |negative| gap slope to emit
+	ConvergenceMinPoints int     // Minimum aligned observations
+
 	// ConfidenceClassEstablished is the MIN_POINTS multiplier that a
 	// signal's supporting sample size must clear to be labelled
 	// "established" instead of "tentative". 2.0 by default — a
@@ -244,6 +254,14 @@ func Default() *Config {
 		CrossScopeMinPoints: defaultEnvInt("CHRONOS_CROSS_SCOPE_MIN_POINTS", 5),
 		AnonymizeCrossScope: defaultEnvBool("CHRONOS_ANONYMIZE_CROSS_SCOPE", false),
 
+		OscillationMinFlipRate: defaultEnvFloat64("CHRONOS_OSCILLATION_MIN_FLIP_RATE", 0.55),
+		OscillationMinPoints:   defaultEnvInt("CHRONOS_OSCILLATION_MIN_POINTS", 6),
+
+		DivergenceMinSlope:   defaultEnvFloat64("CHRONOS_DIVERGENCE_MIN_SLOPE", 0.05),
+		DivergenceMinPoints:  defaultEnvInt("CHRONOS_DIVERGENCE_MIN_POINTS", 5),
+		ConvergenceMinSlope:  defaultEnvFloat64("CHRONOS_CONVERGENCE_MIN_SLOPE", 0.05),
+		ConvergenceMinPoints: defaultEnvInt("CHRONOS_CONVERGENCE_MIN_POINTS", 5),
+
 		ConfidenceClassEstablished: defaultEnvFloat64("CHRONOS_CONFIDENCE_ESTABLISHED", 2.0),
 		ConfidenceClassStrong:      defaultEnvFloat64("CHRONOS_CONFIDENCE_STRONG", 5.0),
 
@@ -325,6 +343,24 @@ func (c *Config) Validate() error {
 	}
 	if c.CrossScopeMinPoints < 3 {
 		return fmt.Errorf("cross-scope min points must be at least 3, got %d", c.CrossScopeMinPoints)
+	}
+	if c.OscillationMinFlipRate < 0 || c.OscillationMinFlipRate > 1 {
+		return fmt.Errorf("oscillation min flip rate must be in [0, 1], got %f", c.OscillationMinFlipRate)
+	}
+	if c.OscillationMinPoints < 4 {
+		return fmt.Errorf("oscillation min points must be at least 4, got %d", c.OscillationMinPoints)
+	}
+	if c.DivergenceMinSlope < 0 {
+		return fmt.Errorf("divergence min slope must be >= 0, got %f", c.DivergenceMinSlope)
+	}
+	if c.DivergenceMinPoints < 3 {
+		return fmt.Errorf("divergence min points must be at least 3, got %d", c.DivergenceMinPoints)
+	}
+	if c.ConvergenceMinSlope < 0 {
+		return fmt.Errorf("convergence min slope must be >= 0, got %f", c.ConvergenceMinSlope)
+	}
+	if c.ConvergenceMinPoints < 3 {
+		return fmt.Errorf("convergence min points must be at least 3, got %d", c.ConvergenceMinPoints)
 	}
 	if c.ConfidenceClassEstablished < 0 {
 		return fmt.Errorf("confidence established multiplier must be >= 0, got %f", c.ConfidenceClassEstablished)

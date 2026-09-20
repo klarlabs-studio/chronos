@@ -84,7 +84,7 @@ Most observability tools answer *"is this metric outside its range?"* Chronos an
 |---|---|---|---|---|
 | **Output** | Typed signal (`Pattern` enum + structured `Metrics`) | Threshold alert (string) | Visual chart | Whatever you write |
 | **Audience** | Systems (agents, schedulers) | Humans (oncall) | Humans (looking) | You |
-| **Detection** | 11 detectors out of the box (recurrence, trend, spike, drop, stall, anomaly, seasonality, correlation, change_point, outlier_cluster, cross_scope_correlation) | Threshold + rate + absent | n/a (visualisation) | What you implement |
+| **Detection** | 14 detectors out of the box (recurrence, trend, spike, drop, stall, anomaly, seasonality, correlation, change_point, outlier_cluster, cross_scope_correlation, oscillation, divergence, convergence) | Threshold + rate + absent | n/a (visualisation) | What you implement |
 | **Storage** | memory / sqlite / postgres / mysql / libsql; namespace-isolated | TSDB | Reads other stores | Yours |
 | **Footprint** | Single static binary, no CGO, ~2 MB Docker image | TSDB cluster | Java/JS app | Depends |
 | **Stable wire** | Yes — `Pattern`, `Evidence.Kind`, `Metrics` keys; SDK in Go | Yes (Prometheus exposition) | n/a | You decide |

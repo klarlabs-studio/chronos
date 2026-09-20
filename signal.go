@@ -47,6 +47,9 @@ const (
 	PatternTypeChangePoint           = domain.PatternTypeChangePoint
 	PatternTypeOutlierCluster        = domain.PatternTypeOutlierCluster
 	PatternTypeCrossScopeCorrelation = domain.PatternTypeCrossScopeCorrelation
+	PatternTypeOscillation           = domain.PatternTypeOscillation
+	PatternTypeDivergence            = domain.PatternTypeDivergence
+	PatternTypeConvergence           = domain.PatternTypeConvergence
 )
 
 // ConfidenceClass constants re-exported.

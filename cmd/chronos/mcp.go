@@ -181,7 +181,7 @@ func mcpRunIngest(ctx context.Context, input mcpIngestInput) (mcpIngestOutput, e
 }
 
 type mcpDescribeDetectorInput struct {
-	Pattern string `json:"pattern" jsonschema:"required,description=Pattern type: trend, spike, drop, stall, anomaly, recurrence, correlation, change_point, outlier_cluster, cross_scope_correlation, seasonality"`
+	Pattern string `json:"pattern" jsonschema:"required,description=Pattern type: trend, spike, drop, stall, anomaly, recurrence, correlation, change_point, outlier_cluster, cross_scope_correlation, seasonality, oscillation, divergence, convergence"`
 }
 
 type mcpDescribeDetectorOutput struct {

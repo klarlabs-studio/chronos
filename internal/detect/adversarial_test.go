@@ -76,6 +76,12 @@ func advCfg() *config.Config {
 		OutlierClusterTimeWindow:   5 * time.Minute,
 		CrossScopeMin:              0.8,
 		CrossScopeMinPoints:        5,
+		OscillationMinFlipRate:     0.55,
+		OscillationMinPoints:       6,
+		DivergenceMinSlope:         0.05,
+		DivergenceMinPoints:        5,
+		ConvergenceMinSlope:        0.05,
+		ConvergenceMinPoints:       5,
 		ConfidenceClassEstablished: 2.0,
 		ConfidenceClassStrong:      5.0,
 	}

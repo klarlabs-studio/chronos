@@ -20,6 +20,9 @@ const (
 	detectorVersionChangePoint           = "changepoint-v1"
 	detectorVersionOutlierCluster        = "outlier_cluster-v1"
 	detectorVersionCrossScopeCorrelation = "cross_scope_correlation-v1"
+	detectorVersionOscillation           = "oscillation-v1"
+	detectorVersionDivergence            = "divergence-v1"
+	detectorVersionConvergence           = "convergence-v1"
 )
 
 // explainSeries builds the explainability payload for a detector that

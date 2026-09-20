@@ -73,7 +73,7 @@ It detects temporal structure such as:
 - correlations;
 - divergence;
 - convergence;
-- plateaus;
+- plateaus (emitted as `stall` — low normalised variance);
 - other statistically defensible temporal patterns.
 
 The distinction matters.
