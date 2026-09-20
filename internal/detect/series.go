@@ -2,6 +2,7 @@ package detect
 
 import (
 	"math"
+	"sort"
 
 	"github.com/felixgeelhaar/chronos"
 	"github.com/google/uuid"
@@ -10,12 +11,50 @@ import (
 // bySeries groups states by entity ID. The Engine sorts by timestamp
 // ascending before invoking detectors, so the slices returned here are
 // already in chronological order.
+//
+// Ranging over the returned map directly leaks Go's randomised map
+// iteration order into the order of emitted signals; detectors that
+// emit one signal per series use [seriesInOrder] instead.
 func bySeries(states []chronos.EntityState) map[uuid.UUID][]chronos.EntityState {
 	out := make(map[uuid.UUID][]chronos.EntityState)
 	for _, s := range states {
 		out[s.EntityID] = append(out[s.EntityID], s)
 	}
 	return out
+}
+
+// seriesInOrder groups states by entity ID like [bySeries] and returns
+// the entity IDs in ascending lexicographic order alongside the map.
+// Detectors iterate the returned ID slice so that repeated runs over
+// identical input emit signals in an identical order — the engine's
+// MaxSignalsPerRun cap truncates the tail, so ordering decides which
+// signals survive.
+func seriesInOrder(states []chronos.EntityState) ([]uuid.UUID, map[uuid.UUID][]chronos.EntityState) {
+	grouped := bySeries(states)
+	return sortedUUIDKeys(grouped), grouped
+}
+
+// sortedUUIDKeys returns the keys of m in ascending lexicographic
+// order. Detectors keyed on a map of entities use it for the same
+// reason as [seriesInOrder]: emitted signal order must not depend on
+// Go's randomised map iteration.
+func sortedUUIDKeys[V any](m map[uuid.UUID]V) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	return ids
+}
+
+// isFinite reports whether x is a real number — neither NaN nor an
+// infinity. Detectors use it to reject derived statistics that
+// overflowed: every comparison against NaN is false, so an
+// unguarded NaN slips through *all* threshold gates and lands in a
+// signal's Strength or Confidence, where domain.Signal.Validate also
+// accepts it (NaN < 0 and NaN > 1 are both false).
+func isFinite(x float64) bool {
+	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }
 
 // outcomes extracts the outcome metric (last feature) from each
@@ -57,6 +96,11 @@ func stddev(xs []float64, m float64) float64 {
 // linearRegression fits y = slope*x + intercept by ordinary least
 // squares. r2 is the coefficient of determination (clamped to [0,1]);
 // it is 0 when the fit is undefined (constant x or y).
+//
+// All three results are 0 when the fit is not a real number. Inputs
+// near math.MaxFloat64 overflow the running sums to ±Inf, and the
+// resulting Inf/Inf divisions yield NaN — an undefined fit, not a
+// fit of unknown quality.
 func linearRegression(xs, ys []float64) (slope, intercept, r2 float64) {
 	n := float64(len(xs))
 	if n < 2 {
@@ -71,20 +115,26 @@ func linearRegression(xs, ys []float64) (slope, intercept, r2 float64) {
 		sumYY += ys[i] * ys[i]
 	}
 	denX := n*sumXX - sumX*sumX
-	if denX == 0 {
+	if denX == 0 || !isFinite(denX) {
 		return 0, 0, 0
 	}
 	slope = (n*sumXY - sumX*sumY) / denX
 	intercept = (sumY - slope*sumX) / n
+	if !isFinite(slope) || !isFinite(intercept) {
+		return 0, 0, 0
+	}
 	denY := n*sumYY - sumY*sumY
-	if denY <= 0 {
+	if denY <= 0 || !isFinite(denY) {
 		return slope, intercept, 0
 	}
 	num := n*sumXY - sumX*sumY
 	r2 = (num * num) / (denX * denY)
-	if r2 < 0 {
+	switch {
+	case !isFinite(r2):
 		r2 = 0
-	} else if r2 > 1 {
+	case r2 < 0:
+		r2 = 0
+	case r2 > 1:
 		r2 = 1
 	}
 	return slope, intercept, r2
@@ -103,7 +153,8 @@ func clamp01(x float64) float64 {
 
 // pearsonCorrelation returns the Pearson correlation coefficient
 // between xs and ys, or 0 when either series is degenerate (length
-// mismatch, fewer than two points, or zero variance).
+// mismatch, fewer than two points, zero variance, or sums that
+// overflow to ±Inf and leave the coefficient undefined).
 func pearsonCorrelation(xs, ys []float64) float64 {
 	if len(xs) != len(ys) || len(xs) < 2 {
 		return 0
@@ -120,10 +171,14 @@ func pearsonCorrelation(xs, ys []float64) float64 {
 	num := n*sumXY - sumX*sumY
 	denX := n*sumXX - sumX*sumX
 	denY := n*sumYY - sumY*sumY
-	if denX <= 0 || denY <= 0 {
+	if denX <= 0 || denY <= 0 || !isFinite(denX) || !isFinite(denY) {
 		return 0
 	}
-	return num / math.Sqrt(denX*denY)
+	r := num / math.Sqrt(denX*denY)
+	if !isFinite(r) {
+		return 0
+	}
+	return r
 }
 
 // autocorrelation returns the Pearson correlation between a series and

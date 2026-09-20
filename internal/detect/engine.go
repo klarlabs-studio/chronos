@@ -103,6 +103,13 @@ func DefaultDetectors(cfg *config.Config) []Detector {
 // Detect groups states by scope and runs every detector against each
 // group. The combined output is sorted by detected-at descending,
 // confidence descending, and capped at cfg.MaxSignalsPerRun.
+//
+// Scopes are visited in ascending scope-ID order. That sort is not
+// cosmetic: the final sort is stable, so signals that tie on
+// detected-at and confidence keep the order the detectors produced
+// them in, and MaxSignalsPerRun then truncates the tail. Visiting
+// the scope map in Go's randomised iteration order would make the
+// surviving set differ between runs over identical input.
 func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []domain.Signal {
 	if len(states) == 0 {
 		return nil
@@ -116,7 +123,8 @@ func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []dom
 	if e.parallel {
 		all = e.detectParallel(ctx, byScope)
 	} else {
-		for scopeID, scoped := range byScope {
+		for _, scopeID := range sortedUUIDKeys(byScope) {
+			scoped := byScope[scopeID]
 			sortByTimestampAsc(scoped)
 			for _, d := range e.detectors {
 				all = append(all, e.runDetector(ctx, d, scopeID, scoped)...)
@@ -180,7 +188,11 @@ func (e *Engine) detectParallel(ctx context.Context, byScope map[uuid.UUID][]chr
 		det     Detector
 	}
 	jobs := make([]job, 0, len(byScope)*len(e.detectors))
-	for scopeID, scoped := range byScope {
+	// Scope-major in sorted scope order, matching the sequential
+	// path: results are gathered by job index, so the job order is
+	// the output order for signals that tie on the final sort keys.
+	for _, scopeID := range sortedUUIDKeys(byScope) {
+		scoped := byScope[scopeID]
 		sortByTimestampAsc(scoped)
 		for _, d := range e.detectors {
 			jobs = append(jobs, job{scopeID: scopeID, states: scoped, det: d})

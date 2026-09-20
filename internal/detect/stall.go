@@ -42,7 +42,9 @@ func (s *Stall) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.En
 		return nil
 	}
 	var signals []domain.Signal
-	for series, observations := range bySeries(states) {
+	ids, grouped := seriesInOrder(states)
+	for _, series := range ids {
+		observations := grouped[series]
 		if len(observations) < s.cfg.StallMinPoints {
 			continue
 		}

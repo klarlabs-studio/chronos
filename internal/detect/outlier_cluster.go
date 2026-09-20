@@ -61,7 +61,9 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 
 	// Pass 1: per-series outlier events.
 	var events []outlierEvent
-	for series, observations := range bySeries(states) {
+	ids, grouped := seriesInOrder(states)
+	for _, series := range ids {
+		observations := grouped[series]
 		ys := outcomes(observations)
 		if len(ys) < 3 {
 			continue
@@ -102,9 +104,18 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 		key := e.t.UnixNano() / int64(window)
 		bucketStarts[key] = append(bucketStarts[key], e)
 	}
+	// Emit buckets oldest-first. Ranging the map directly would order
+	// signals by Go's randomised map iteration, and the engine's
+	// MaxSignalsPerRun cap truncates the tail.
+	bucketKeys := make([]int64, 0, len(bucketStarts))
+	for k := range bucketStarts {
+		bucketKeys = append(bucketKeys, k)
+	}
+	sort.Slice(bucketKeys, func(i, j int) bool { return bucketKeys[i] < bucketKeys[j] })
 
 	var signals []domain.Signal
-	for _, bucket := range bucketStarts {
+	for _, key := range bucketKeys {
+		bucket := bucketStarts[key]
 		// Distinct-series count.
 		seen := map[uuid.UUID]float64{}
 		for _, e := range bucket {
@@ -116,7 +127,6 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 			continue
 		}
 		// Build the signal.
-		bucket := bucket // for closure
 		earliest, latest := bucket[0].t, bucket[0].t
 		for _, e := range bucket {
 			if e.t.Before(earliest) {
@@ -127,12 +137,7 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 			}
 		}
 		ev := make([]domain.Evidence, 0, len(seen))
-		seriesIDs := make([]uuid.UUID, 0, len(seen))
-		for sid := range seen {
-			seriesIDs = append(seriesIDs, sid)
-		}
-		sort.Slice(seriesIDs, func(i, j int) bool { return seriesIDs[i].String() < seriesIDs[j].String() })
-		for _, sid := range seriesIDs {
+		for _, sid := range sortedUUIDKeys(seen) {
 			ev = append(ev, domain.Evidence{
 				Series:  sid,
 				Time:    latest,

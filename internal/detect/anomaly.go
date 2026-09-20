@@ -49,7 +49,8 @@ func (a *Anomaly) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.
 	}
 
 	var signals []domain.Signal
-	for entityID, subject := range latest {
+	for _, entityID := range sortedUUIDKeys(latest) {
+		subject := latest[entityID]
 		evidence := a.peerEvidence(entityID, subject, latest)
 		if len(evidence) < a.cfg.AnomalyMinPeers {
 			continue
@@ -68,10 +69,11 @@ func (a *Anomaly) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.
 
 func (a *Anomaly) peerEvidence(subjectID uuid.UUID, subject chronos.EntityState, latest map[uuid.UUID]chronos.EntityState) []domain.Evidence {
 	var ev []domain.Evidence
-	for peerID, peer := range latest {
+	for _, peerID := range sortedUUIDKeys(latest) {
 		if peerID == subjectID {
 			continue
 		}
+		peer := latest[peerID]
 		ev = append(ev, domain.Evidence{
 			Series: peerID,
 			Time:   peer.Timestamp,
