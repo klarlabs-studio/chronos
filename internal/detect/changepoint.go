@@ -11,6 +11,13 @@ import (
 	"github.com/google/uuid"
 )
 
+// changePointInfiniteShift is the finite sentinel Detect substitutes
+// for a +Inf standardised mean shift (two perfectly constant regimes
+// with different means). It is larger than any shift a noisy series
+// can produce in practice, so the clean split wins the ranking, and
+// it is JSON-representable so Signal.Metrics stays valid.
+const changePointInfiniteShift = 1e12
+
 // ChangePoint detects PatternTypeChangePoint: a step change in the
 // mean of the outcome metric. Distinct from Spike/Drop (short-lived
 // deviations) and Trend (continuous slope) — a change point is a
@@ -61,8 +68,17 @@ func (c *ChangePoint) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 		bestK, bestShift := -1, 0.0
 		for k := minSide; k <= len(ys)-minSide; k++ {
 			s := standardisedMeanShift(ys[:k], ys[k:])
-			if math.IsNaN(s) || math.IsInf(s, 0) {
+			if math.IsNaN(s) {
 				continue
+			}
+			// +Inf means two constant regimes with different means —
+			// the strongest possible evidence of a step. Ranking it
+			// below any finite noisy split was the previous bug; treat
+			// it as strictly larger than every finite candidate. The
+			// metric bag stores a large finite sentinel so the wire
+			// stays JSON-representable.
+			if math.IsInf(s, 0) {
+				s = changePointInfiniteShift
 			}
 			if s > bestShift {
 				bestShift = s
@@ -93,9 +109,12 @@ func (c *ChangePoint) build(scopeID, series uuid.UUID, observations []chronos.En
 	left, right := ys[:k], ys[k:]
 	meanLeft, meanRight := mean(left), mean(right)
 	stdLeft, stdRight := stddev(left, meanLeft), stddev(right, meanRight)
-	strength := clamp01((shift - c.cfg.ChangePointMinShift) / c.cfg.ChangePointMinShift)
-	if shift >= 2*c.cfg.ChangePointMinShift {
-		strength = clamp01(0.5 + (shift-2*c.cfg.ChangePointMinShift)/(4*c.cfg.ChangePointMinShift))
+	strength := 1.0
+	if shift < changePointInfiniteShift {
+		strength = clamp01((shift - c.cfg.ChangePointMinShift) / c.cfg.ChangePointMinShift)
+		if shift >= 2*c.cfg.ChangePointMinShift {
+			strength = clamp01(0.5 + (shift-2*c.cfg.ChangePointMinShift)/(4*c.cfg.ChangePointMinShift))
+		}
 	}
 	confidence := strength * sampleFactor(len(ys), 2*c.cfg.ChangePointMinPoints)
 	metrics := map[string]float64{
@@ -142,7 +161,9 @@ func (c *ChangePoint) build(scopeID, series uuid.UUID, observations []chronos.En
 // standardisedMeanShift computes |mean(a) - mean(b)| / pooled_stddev.
 // Returns NaN when both regimes are constant (pooled_stddev == 0) and
 // the means agree, +Inf when pooled_stddev is zero but the means
-// differ (a constant-but-shifted regime).
+// differ (a constant-but-shifted regime). Detect maps +Inf onto
+// [changePointInfiniteShift] before ranking so the clean split wins
+// and the wire metric stays finite.
 func standardisedMeanShift(a, b []float64) float64 {
 	if len(a) < 2 || len(b) < 2 {
 		return math.NaN()

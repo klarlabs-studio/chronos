@@ -57,6 +57,37 @@ Each detector emits a stable `Evidence.Kind` (single string) and a stable set of
 
 Every numeric value a signal carries — `Strength`, `Confidence`, `Evidence.Score`, and each value in `Signal.Metrics` and `Evidence.Metrics` — is a finite JSON number. A detector whose arithmetic overflows to `NaN` or an infinity emits no signal rather than an unrepresentable one, so a consumer never sees `null`, a string sentinel, or an empty metric bag standing in for a value that could not be encoded.
 
+## Strength and Confidence (all detectors)
+
+Strength and Confidence are distinct (Intent §7):
+
+- **Strength** — magnitude of the observed pattern in `[0, 1]`.
+- **Confidence** — quality / certainty of the evidence supporting the detection in `[0, 1]`.
+- **ConfidenceClass** — qualitative grade (`tentative` / `established` / `strong`) from sample size vs each detector's `MIN_POINTS` and the `CHRONOS_CONFIDENCE_*` multipliers.
+
+Unless noted otherwise, Confidence is `strength × sampleFactor(n, saturate)`, where `sampleFactor` ramps linearly to 1.0 at `saturate` supporting samples. Spike/Drop are the exception: they use an evidence-quality product that is intentionally flat in `|z|` past a margin.
+
+| Pattern | Strength | Confidence | ConfidenceClass sample basis |
+|---|---|---|---|
+| `recurrence` | mean peer cosine similarity | `strength × sampleFactor(peers, 5)` | peer count vs `MinSampleSize` |
+| `trend` | R² of ordinal OLS | `strength × sampleFactor(n, 2×TrendMinPoints)` | `n` vs `TrendMinPoints` |
+| `spike` / `drop` | `min(\|z\|/5, 1)` | `support × quietness × margin` (see below) | `n` vs `SpikeWindow+1` |
+| `stall` | `1 − normalised_stddev / StallMaxStdDev` | `strength × sampleFactor(n, 2×StallMinPoints)` | `n` vs `StallMinPoints` |
+| `anomaly` | `1 − max_peer_similarity` | `strength × sampleFactor(peers, 5)` | peer count vs `AnomalyMinPeers` |
+| `seasonality` | peak autocorrelation | `strength × sampleFactor(n, 2×SeasonalityMinPoints)` | `n` vs `SeasonalityMinPoints` |
+| `correlation` | `\|r\|` | `strength × sampleFactor(n, 2×CorrelationMinPoints)` | aligned `n` vs `CorrelationMinPoints` (≥ 3) |
+| `change_point` | scaled standardised shift (Inf → 1.0) | `strength × sampleFactor(n, 2×ChangePointMinPoints)` | `n` vs `ChangePointMinPoints` |
+| `outlier_cluster` | how far `member_count` exceeds the floor | `strength × sampleFactor(members, 2×OutlierClusterMinSeries)` | member count vs `OutlierClusterMinSeries` |
+| `cross_scope_correlation` | `\|r\|` | `\|r\| × sampleFactor(n, 2×CrossScopeMinPoints)` | aligned `n` vs `CrossScopeMinPoints` (≥ 3) |
+
+**Trend axis.** Trend regresses outcome against **ordinal index**, not wall-clock time. Irregular sampling does not change slope / R² / strength / confidence. Wall-clock rate-of-change is out of scope for the current detector.
+
+**Anomaly zero vectors.** Subjects or peers with zero L2 norm are skipped: cosine similarity against a directionless vector is undefined, not “maximally isolated”.
+
+## Evidence kinds and metric keys per detector
+
+Each detector emits a stable `Evidence.Kind` (single string) and a stable set of keys in `Signal.Metrics` and `Evidence.Metrics`. Future evolutions add keys; renames or removals are breaking changes.
+
 ### Recurrence — `Pattern: "recurrence"`
 
 - **Evidence.Kind**: `similar_state` — one per peer state above the similarity threshold.
@@ -67,16 +98,18 @@ Every numeric value a signal carries — `Strength`, `Confidence`, `Evidence.Sco
   - `avg_similarity` — mean of evidence scores.
   - `sample_size` — number of peer cases.
   - `avg_outcome_diff` — mean of evidence `outcome_diff`.
+- **Strength / Confidence**: see table above.
 
 ### Trend — `Pattern: "trend"`
 
 - **Evidence.Kind**: `regression_summary` — exactly one per signal.
 - **Evidence.Score**: R² of the regression.
 - **Evidence.Metrics** *(equal to Signal.Metrics)*:
-  - `slope` — OLS slope of outcome vs. ordinal index.
+  - `slope` — OLS slope of outcome vs. **ordinal index** (not wall-clock time).
   - `intercept` — OLS intercept.
   - `r2` — coefficient of determination.
   - `n` — number of observations in the window.
+- **Strength / Confidence**: see table above.
 
 ### Spike / Drop — `Pattern: "spike" | "drop"`
 

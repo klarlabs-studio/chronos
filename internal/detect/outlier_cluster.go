@@ -84,8 +84,14 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 				continue // truly flat — not an outlier
 			default:
 				// Constant baseline + a different value is the
-				// strongest possible outlier. Use a saturated z so
-				// the row counts.
+				// strongest possible relative outlier — but only when
+				// the absolute deviation is large enough to be a real
+				// observation rather than a denormal ulp. Without a
+				// floor, 5e-324 saturates peak_z at 100 and forms
+				// cohort signals out of numerical noise.
+				if !meaningfulAbsoluteDeviation(ys[i], m) {
+					continue
+				}
 				z = 100
 			}
 			if z >= o.cfg.OutlierClusterZ {
@@ -148,7 +154,10 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 		}
 		seriesCount := float64(len(seen))
 		strength := clamp01((seriesCount - float64(o.cfg.OutlierClusterMinSeries)) / float64(o.cfg.OutlierClusterMinSeries+1))
-		confidence := clamp01(strength + 0.3) // a clear cluster is meaningful even at the floor
+		// Confidence measures how well the cohort is supported, not
+		// "strength plus a constant". Sample saturation uses twice the
+		// minimum series floor so a bare-minimum cluster stays tentative.
+		confidence := clamp01(strength * sampleFactor(len(seen), 2*o.cfg.OutlierClusterMinSeries))
 		signals = append(signals, domain.Signal{
 			ID:              uuid.New(),
 			ScopeID:         scopeID,

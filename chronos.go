@@ -180,15 +180,22 @@ type Closer interface {
 	Close() error
 }
 
-// Registry holds the process-wide set of adapters. Adapters register themselves
-// via init() so that only the adapter's import is required to make it
-// available — there is no central list of adapters in the engine.
-var (
-	registryMu sync.RWMutex
-	registry   = make(map[string]Source)
-)
+// Registry holds a set of adapters keyed by Source.Name(). Construct
+// with [NewRegistry] when a process needs isolated Chronos engines
+// (multiple independently configured registries in one binary). The
+// package-level [Register] / [Get] / [Adapters] helpers delegate to
+// [DefaultRegistry] for the common single-engine case.
+type Registry struct {
+	mu     sync.RWMutex
+	byName map[string]Source
+}
 
-// Register adds src to the global adapter registry, keyed on src.Name().
+// NewRegistry returns an empty adapter registry.
+func NewRegistry() *Registry {
+	return &Registry{byName: make(map[string]Source)}
+}
+
+// Register adds src to the registry, keyed on src.Name().
 // It panics if src or src.Name() is empty so registration mistakes
 // surface at program start.
 //
@@ -196,7 +203,7 @@ var (
 // entry (last-write-wins). This is intentional so a program that
 // imports both the library surface and the cmd/chronos binary doesn't
 // panic on duplicate init() registration; see ADR 0001.
-func Register(src Source) {
+func (r *Registry) Register(src Source) {
 	if src == nil {
 		panic("chronos: Register called with nil Source")
 	}
@@ -204,28 +211,49 @@ func Register(src Source) {
 	if name == "" {
 		panic("chronos: Source.Name() must be non-empty")
 	}
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	registry[name] = src
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byName[name] = src
 }
 
-// Get returns the adapter registered under name. The boolean is false when no
-// such adapter has been registered.
-func Get(name string) (Source, bool) {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	src, ok := registry[name]
+// Get returns the adapter registered under name. The boolean is false
+// when no such adapter has been registered.
+func (r *Registry) Get(name string) (Source, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	src, ok := r.byName[name]
 	return src, ok
 }
 
-// Adapters returns the names of all registered adapters in unspecified order.
-// Useful for "chronos compute --help" output and registry diagnostics.
-func Adapters() []string {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	names := make([]string, 0, len(registry))
-	for name := range registry {
+// Adapters returns the names of all registered adapters in unspecified
+// order.
+func (r *Registry) Adapters() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	names := make([]string, 0, len(r.byName))
+	for name := range r.byName {
 		names = append(names, name)
 	}
 	return names
 }
+
+// defaultRegistry is the process-wide convenience registry. Prefer
+// [NewRegistry] when embedding multiple independently configured
+// Chronos engines in one process.
+var defaultRegistry = NewRegistry()
+
+// DefaultRegistry returns the process-wide adapter registry used by
+// [Register], [Get], and [Adapters].
+func DefaultRegistry() *Registry { return defaultRegistry }
+
+// Register adds src to the default adapter registry. See
+// [Registry.Register].
+func Register(src Source) { defaultRegistry.Register(src) }
+
+// Get returns the adapter registered under name on the default
+// registry. See [Registry.Get].
+func Get(name string) (Source, bool) { return defaultRegistry.Get(name) }
+
+// Adapters returns the names of all adapters on the default registry.
+// See [Registry.Adapters].
+func Adapters() []string { return defaultRegistry.Adapters() }

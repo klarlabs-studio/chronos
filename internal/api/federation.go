@@ -20,7 +20,7 @@ import (
 // Nothing in the payload identifies a tenant. There are no scope_ids,
 // no series ids, no signal ids, and no per-row evidence. That is the
 // load-bearing safety property of the federation hook — the export
-// is community-grade statistical insight, not raw data.
+// is community-grade statistical perception, not raw data.
 type FederationExportResponse struct {
 	GeneratedAt  time.Time                `json:"generated_at"`
 	Source       string                   `json:"source"`  // "chronos"

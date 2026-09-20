@@ -18,9 +18,10 @@ Authoritative Intent and hardening priorities: [`intent.md`](intent.md).
 
 ## Open
 
-### Intent P2 — embeddability
+### Intent P2 — embeddability follow-ups
 
-Injectable adapter registry so multiple independently configured engines can coexist in one process. Package-level `Register` remains a convenience API. See [`adr/0001-embeddable-engine-api.md`](adr/0001-embeddable-engine-api.md).
+Injectable `chronos.Registry` is shipped. Still open: dogfood `embed.Engine`
+from `cmd/chronos compute`; optional isolation of the store-provider registry.
 
 ### Capability ports unused
 

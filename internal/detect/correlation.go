@@ -41,7 +41,8 @@ func (c *Correlation) Pattern() domain.PatternType { return domain.PatternTypeCo
 
 // Detect runs pairwise Pearson correlations within the scope.
 func (c *Correlation) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.EntityState) []domain.Signal {
-	if c.cfg.CorrelationMinPoints < 2 {
+	// Two points are always collinear; refuse floors that manufacture |r|=1.
+	if c.cfg.CorrelationMinPoints < 3 {
 		return nil
 	}
 	series := bySeries(states)

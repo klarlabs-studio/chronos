@@ -141,6 +141,22 @@ func TestRegistry_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestRegistry_IsolatedInstances(t *testing.T) {
+	a := chronos.NewRegistry()
+	b := chronos.NewRegistry()
+	name := "isolated-" + time.Now().Format("150405.000000")
+	a.Register(&stubSource{name: name})
+	if _, ok := b.Get(name); ok {
+		t.Fatal("registry B must not see adapters registered on A")
+	}
+	if _, ok := a.Get(name); !ok {
+		t.Fatal("registry A must see its own adapter")
+	}
+	if _, ok := chronos.Get(name); ok {
+		t.Fatal("default registry must not see an isolated registry's adapters")
+	}
+}
+
 func TestRegister_PanicsOnNil(t *testing.T) {
 	defer func() {
 		if recover() == nil {

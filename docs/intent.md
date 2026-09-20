@@ -346,12 +346,12 @@ Before significantly expanding Chronos’s detector catalog, prioritize hardenin
 
 | Priority | Theme | Status |
 |---|---|---|
-| **P0** | Input invariants — `EntityState` validation; observation IDs; timestamps; finite numerics; malformed feature sets | Largely shipped (0.17+); observation ID required at the EntityState boundary |
-| **P1** | Numerical robustness — adversarial coverage across every detector | Shipped (`internal/detect/adversarial_test.go`) |
-| **P1** | Temporal contract — deterministic ordering and duplicate semantics | Documented in [`temporal-contract.md`](temporal-contract.md); enforced in engine + store conformance |
-| **P1** | Storage conformance — reusable backend contract suite on every backend | Shipped (`internal/store/conformance`) |
-| **P2** | Contract consistency — terminology and documentation drift | Ongoing; Intent is the source of truth |
-| **P2** | Embeddability — reduce process-global state; injectable registry long-term | Partial (`embed/`); package registry remains a convenience API |
+| **P0** | Input invariants — `EntityState` validation; observation IDs; timestamps; finite numerics; malformed feature sets | Done |
+| **P1** | Numerical robustness — adversarial coverage; resolve correctness findings (ChangePoint Inf, Anomaly zero-vec, OutlierCluster denormal, two-point correlation) | Done |
+| **P1** | Temporal contract — deterministic ordering and duplicate semantics | Done ([`temporal-contract.md`](temporal-contract.md) + embed OOO integration test) |
+| **P1** | Storage conformance — reusable backend contract suite on every backend | Done (`internal/store/conformance`) |
+| **P2** | Contract consistency — terminology and documentation drift | Done for Intent adoption; ongoing maintenance |
+| **P2** | Embeddability — injectable `chronos.Registry`; package helpers remain convenience API | Done for adapter registry; cmd dogfood of `embed` still open |
 
 See [`../ROADMAP.md`](../ROADMAP.md) for near-term scope beyond this hardening track.
 

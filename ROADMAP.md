@@ -34,7 +34,7 @@ The authoritative product Intent — principles, detector acceptance criteria, a
 
 **Infra.**
 - Bearer-token auth on HTTP and gRPC (shares `CHRONOS_API_TOKEN`).
-- Conventional Commits, golangci-lint clean, race-tests green on Go 1.25 and 1.26.
+- Conventional Commits, golangci-lint clean, race-tests green on Go 1.25 (CI matrix).
 - GoReleaser — Docker images and GitHub Release archives.
 - coverctl per-domain coverage gating; nox security baseline.
 
@@ -51,7 +51,9 @@ Keep README, package comments, ADRs, CI claims, and [`docs/wire-contract.md`](do
 
 ### 2. Intent P2 — embeddability
 
-Reduce reliance on process-global state where isolation matters. Long-term: an injectable adapter registry so multiple independently configured Chronos engines can coexist in one process. Package-level `Register` / `Get` / `Adapters` remain a convenience API. See [`docs/adr/0001-embeddable-engine-api.md`](docs/adr/0001-embeddable-engine-api.md).
+Injectable `chronos.Registry` is shipped. Remaining: dogfood `embed.Engine`
+from `cmd/chronos compute`, and optionally isolate the store-provider
+registry the same way. See [`docs/adr/0001-embeddable-engine-api.md`](docs/adr/0001-embeddable-engine-api.md).
 
 ### 3. Capability ports
 

@@ -307,6 +307,13 @@ func (c *Config) Validate() error {
 	if c.CorrelationMin < 0 || c.CorrelationMin > 1 {
 		return fmt.Errorf("correlation min must be in [0, 1], got %f", c.CorrelationMin)
 	}
+	// Two aligned points are always collinear (Pearson |r| = 1), so a
+	// floor below 3 invents perfect correlation from any pair. The
+	// shipped default is 5; this rejects misconfiguration, not the
+	// happy path.
+	if c.CorrelationMinPoints < 3 {
+		return fmt.Errorf("correlation min points must be at least 3, got %d", c.CorrelationMinPoints)
+	}
 	if c.ChangePointMinShift < 0 {
 		return fmt.Errorf("changepoint min shift must be >= 0, got %f", c.ChangePointMinShift)
 	}
@@ -315,6 +322,9 @@ func (c *Config) Validate() error {
 	}
 	if c.CrossScopeMin < 0 || c.CrossScopeMin > 1 {
 		return fmt.Errorf("cross-scope min must be in [0, 1], got %f", c.CrossScopeMin)
+	}
+	if c.CrossScopeMinPoints < 3 {
+		return fmt.Errorf("cross-scope min points must be at least 3, got %d", c.CrossScopeMinPoints)
 	}
 	if c.ConfidenceClassEstablished < 0 {
 		return fmt.Errorf("confidence established multiplier must be >= 0, got %f", c.ConfidenceClassEstablished)

@@ -15,6 +15,13 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **[`docs/temporal-contract.md`](docs/temporal-contract.md)** —
   deterministic behaviour for observation IDs, timestamps, ordering,
   duplicate IDs/timestamps, sparse/irregular series, and signal immutability.
+- **Injectable `chronos.Registry`** — `NewRegistry` / method receivers;
+  package-level `Register` / `Get` / `Adapters` delegate to
+  `DefaultRegistry()` so multiple engines can coexist in one process.
+- **Per-detector Strength / Confidence table** in
+  [`docs/wire-contract.md`](docs/wire-contract.md).
+- **Embed temporal-contract integration test** — out-of-order ingest,
+  duplicate ID upsert, duplicate timestamps → Detect determinism.
 
 ### Changed
 - **BREAKING for embedded callers: `EntityState.Validate` rejects a nil
@@ -25,6 +32,25 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   `embed.Engine.Process`) must set `ID` — typically `uuid.New()`.
 - Package and adapter docs drop residual “insight” vocabulary in favour
   of Observation → Detection → Signal, matching the Intent.
+- **`config.Validate` requires `CorrelationMinPoints` and
+  `CrossScopeMinPoints` ≥ 3** — two aligned points are always collinear,
+  so a floor of 2 manufactured perfect `|r| = 1`. Detectors also refuse
+  floors below 3 as defence in depth. Shipped defaults remain 5.
+- **ADR 0001** updated to describe the shipped `embed/` package and
+  injectable registry (was drafted as root-package `chronos.Engine`).
+
+### Fixed
+- **ChangePoint ranks clean constant-regime steps as maximum evidence**
+  instead of discarding `+Inf` standardised shifts and preferring noisy
+  splits. The wire metric stores a finite sentinel (`1e12`).
+- **Anomaly skips zero-norm (and length-mismatched) feature vectors** —
+  cosine similarity against a directionless vector is undefined, not
+  “maximally isolated”.
+- **OutlierCluster ignores denormal absolute deviations** off a
+  zero-variance baseline and derives Confidence as
+  `strength × sampleFactor`, not `strength + 0.3`.
+
+### Changed (spike/drop confidence — prior unreleased)
 - **Spike and Drop derive Confidence from the quality of the evidence
   instead of copying Strength.** This changes the confidence number
   emitted for every spike and drop signal, so it wants a minor version
@@ -79,8 +105,6 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   cleanly — the failure mode 0.17.0 fixed in the detectors' arithmetic.
   The new confidence passes through an explicit finiteness guard rather
   than `clamp01`, which returns `NaN` unchanged.
-
-||||||| 1412fc5
 
 ### Changed
 - **BREAKING: `Signal.Validate` rejects non-finite numbers anywhere in a
