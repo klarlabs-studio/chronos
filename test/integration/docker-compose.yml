@@ -66,6 +66,19 @@ services:
       MNEMOS_DB_URL: "sqlite:///data/mnemos.db"
       MNEMOS_HTTP_HOST: "0.0.0.0"
       MNEMOS_HTTP_PORT: "7777"
+      # The smoke test authenticates with a token minted by the CLI
+      # inside this container (see the workflow). Both `serve` and
+      # `token issue` resolve the signing key through
+      # auth.DefaultSecretPath, which honours MNEMOS_AUTH_DIR -- so
+      # pinning it here is what guarantees the issuer and the verifier
+      # read the same key.
+      #
+      # It happens to work without this: both processes fall back to
+      # the same project-root/home path in this image. That agreement
+      # is implicit and unowned, and a token signed with a key the
+      # server never loaded fails as 401 "invalid or revoked token",
+      # which looks like a bad token rather than a split key. Pin it.
+      MNEMOS_AUTH_DIR: "/data"
     command: ["serve"]
     volumes:
       - mnemos-data:/data

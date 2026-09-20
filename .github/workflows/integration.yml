@@ -38,6 +38,37 @@ jobs:
       - name: Boot stack
         run: docker compose -f test/integration/docker-compose.yml up -d --wait
 
+      # mnemos is secure by default: every /v1 request needs a bearer
+      # token, reads included, and there is no anonymous mode. Mint one
+      # against the running stack rather than baking a fixture token in
+      # -- the signing key is generated per stack, so a committed token
+      # could never verify.
+      #
+      # Least privilege on purpose: `user create` with no --scope grants
+      # the "*" wildcard by schema default. This suite only appends
+      # episodes, so it gets events:write and nothing else -- a token
+      # that leaks from a CI log cannot be used to read the brain.
+      - name: Mint mnemos token
+        run: |
+          set -euo pipefail
+          compose() { docker compose -f test/integration/docker-compose.yml exec -T mnemos "$@"; }
+          user_id=$(compose mnemos user create \
+            --name smoke --email smoke@integration.local --scope events:write \
+            | sed -n 's/^user_id=\([^ ]*\).*/\1/p')
+          if [ -z "$user_id" ]; then
+            echo "could not parse user_id from 'mnemos user create' output" >&2
+            exit 1
+          fi
+          token=$(compose mnemos token issue --user "$user_id" --ttl 1h | tail -1 | tr -d '\r')
+          if [ -z "$token" ]; then
+            echo "could not parse token from 'mnemos token issue' output" >&2
+            exit 1
+          fi
+          # ::add-mask:: before ::set-env:: so the value is redacted in
+          # every later log line, including a step that echoes its env.
+          echo "::add-mask::$token"
+          echo "MNEMOS_INTEGRATION_TOKEN=$token" >> "$GITHUB_ENV"
+
       - name: Smoke test
         env:
           CHRONOS_INTEGRATION_URL: http://127.0.0.1:7778
