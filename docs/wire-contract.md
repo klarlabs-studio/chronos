@@ -29,7 +29,7 @@ gRPC RPCs match the HTTP surface additively: unary `Ingest` + `IngestBatch`, `Li
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v1`, `trend-v1`, `spike-v1`, `drop-v1`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`.
+Current `detector_version` values: `recurrence-v1`, `trend-v1`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`.
 
 ## Pattern enum
 
@@ -92,6 +92,7 @@ Spike and Drop share the same evidence shape; sign of `z` distinguishes them.
   - `z`, `baseline_mean`, `baseline_stddev` — same as evidence.
   - `observed_outcome` — the latest outcome value.
   - `window` — `SpikeWindow` size (number of baseline points).
+- **Confidence**: quality of the evidence, not the size of the deviation. `support × quietness × margin` — see [`architecture.md`](architecture.md) for the terms. It is flat in `|z|` once the deviation is 25% past the trigger threshold, so consumers ranking by *how big* a spike was must read `strength` (or `z`), not `confidence`. Emitted values changed in `spike-v2` / `drop-v2`; the same input produces a lower number than it did under `spike-v1` / `drop-v1`, where confidence was a copy of strength.
 
 ### Stall — `Pattern: "stall"`
 
