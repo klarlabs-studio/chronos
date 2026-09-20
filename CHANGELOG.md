@@ -4,9 +4,37 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
-## [Unreleased]
+## [0.17.0] - 2026-09-20
+
+### Changed
+- **BREAKING: `EntityState.Validate` enforces the numerical and temporal
+  invariants.** It previously checked identity, feature presence and label
+  arity and said nothing about the values themselves, so `NaN`, `+Inf`,
+  `-Inf` and the zero timestamp all reached the detectors. Three new
+  errors reject them at the boundary: `ErrNonFiniteFeature`,
+  `ErrMissingTimestamp` and `ErrEmptyLabel`.
+
+  `NaN` is why this is a correctness problem rather than a tidiness one.
+  It is not equal to itself and every comparison against it is false, so a
+  threshold gate does not reject it — it fails open, and the detector
+  emits a signal with a plausible shape and meaningless numbers instead of
+  staying silent.
+
+  The wire is unaffected: HTTP, gRPC and MCP already default an omitted
+  timestamp to now before an `EntityState` is constructed. Finite extremes
+  — `MaxFloat64`, denormals, zero — remain valid; the invariant is
+  finiteness, not magnitude. Embedded callers constructing an
+  `EntityState` directly with a zero `Timestamp` must now set one.
 
 ### Added
+- **Adversarial numerical coverage for all eleven detectors** — 195
+  subtests over zero variance, constant series, sample counts at and below
+  each detector's documented minimum, `MaxFloat64` and denormal
+  magnitudes, identical vectors, duplicate timestamps, out-of-order
+  arrival, irregular intervals and sparse series, plus per-detector
+  determinism checks. Behaviour that is questionable but whose correction
+  would be a contract change is pinned by a `TestFinding_*` test recording
+  the concrete input and output, rather than quietly asserted as correct.
 - **A storage backend conformance suite** (`internal/store/conformance`),
   run by all five backends — memory, SQLite, libSQL, PostgreSQL,
   MySQL/MariaDB — from their own packages. 27 contract groups cover
@@ -21,6 +49,27 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   unnoticed nor be repaired unnoticed.
 
 ### Fixed
+- **`NaN` strength and confidence escaped four detectors and passed
+  `Signal.Validate`.** The range check reads
+  `Strength < 0 || Strength > 1`, and both comparisons are false for
+  `NaN`, so an invalid signal validated cleanly. Reachable from entirely
+  legal input: twelve observations of `MaxFloat64` gave trend, spike and
+  drop `Strength=NaN, Confidence=NaN, Validate()=nil`. Guards now live in
+  `linearRegression`, `pearsonCorrelation` and `zScoreSignal`, each of
+  which already promised the behaviour in its own doc comment. Note this
+  is a distinct problem from the input invariants above: finite input can
+  still produce non-finite output, so guarding the boundary alone was not
+  sufficient.
+- **Recurrence emitted `Strength = 1.0000000000000002`** for identical
+  feature vectors — a signal that fails its own `Validate`, which the
+  `Detector` contract forbids. `similarity.Cosine` returned two ulp above
+  its documented `[-1, 1]` range; it is clamped there.
+- **Signal order was decided by map iteration** in eight detectors and in
+  the engine's scope grouping, on both the sequential and parallel paths.
+  Trend over eight series differed from its first run in 175 of 200
+  repeats. Because the final sort is stable, this silently decided which
+  signals survived `MaxSignalsPerRun` — the same input could yield
+  different retained signals run to run. Keys are now sorted before use.
 - **PostgreSQL lost its namespace on every connection but the first.**
   The schema was selected with `SET search_path`, which is a property of
   one session, while the pool opens up to 25. Whichever connection
