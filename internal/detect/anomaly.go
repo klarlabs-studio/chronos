@@ -64,7 +64,7 @@ func (a *Anomaly) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.
 		}
 		signals = append(signals, a.build(scopeID, entityID, subject, evidence, maxSim))
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func (a *Anomaly) peerEvidence(subjectID uuid.UUID, subject chronos.EntityState, latest map[uuid.UUID]chronos.EntityState) []domain.Evidence {

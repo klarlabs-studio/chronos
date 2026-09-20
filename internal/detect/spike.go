@@ -130,7 +130,7 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 			}},
 		})
 	}
-	return signals
+	return keepValid(signals)
 }
 
 const (

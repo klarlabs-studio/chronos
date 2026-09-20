@@ -62,7 +62,7 @@ func (t *Trend) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.En
 		}
 		signals = append(signals, t.build(scopeID, series, observations, slope, intercept, r2))
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func (t *Trend) build(scopeID, series uuid.UUID, observations []chronos.EntityState, slope, intercept, r2 float64) domain.Signal {

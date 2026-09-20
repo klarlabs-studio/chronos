@@ -135,6 +135,15 @@ func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []dom
 		all = append(all, e.runCross(ctx, d, states)...)
 	}
 
+	// The last gate before the pipeline persists and the API serves.
+	// Each detector already filters its own output, but Detector is an
+	// interface: an out-of-tree detector is under the same contract and
+	// nothing else checks that it kept it. A signal that fails its own
+	// invariants is dropped rather than repaired — the engine has no
+	// basis on which to invent the quantity the detector failed to
+	// measure.
+	all = keepValid(all)
+
 	for i := range all {
 		all[i].ID = domain.PerceptionID(all[i])
 	}

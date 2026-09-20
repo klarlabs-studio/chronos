@@ -52,7 +52,7 @@ func (s *Seasonality) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 		}
 		signals = append(signals, s.build(scopeID, series, observations, lag, r))
 	}
-	return signals
+	return keepValid(signals)
 }
 
 // bestAutocorrelation searches for the lag in [minLag, maxLag] with the

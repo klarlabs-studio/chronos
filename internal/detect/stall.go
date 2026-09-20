@@ -58,7 +58,7 @@ func (s *Stall) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.En
 		}
 		signals = append(signals, s.build(scopeID, series, observations, ys, nm))
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func (s *Stall) build(scopeID, series uuid.UUID, observations []chronos.EntityState, ys []float64, normStddev float64) domain.Signal {

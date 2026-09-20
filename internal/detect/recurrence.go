@@ -51,7 +51,7 @@ func (r *Recurrence) Detect(_ context.Context, scopeID uuid.UUID, states []chron
 		}
 		signals = append(signals, r.buildSignal(scopeID, subject, evidence))
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func mostRecentByEntity(states []chronos.EntityState) map[uuid.UUID]chronos.EntityState {

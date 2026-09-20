@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
 	"testing"
@@ -68,6 +69,25 @@ func TestSignal_Validate(t *testing.T) {
 		{"confidence > 1", func(s *Signal) { s.Confidence = 1.5 }, ErrInvalidConfidence},
 		{"confidence < 0", func(s *Signal) { s.Confidence = -0.1 }, ErrInvalidConfidence},
 		{"window inverted", func(s *Signal) { s.Window = TimeWindow{Start: now, End: now.Add(-time.Hour)} }, ErrInvalidWindow},
+		// NaN passes a bare range check: NaN < 0 and NaN > 1 are both
+		// false. These two cases exist so the finiteness test cannot be
+		// deleted as redundant with the range test above.
+		{"strength NaN", func(s *Signal) { s.Strength = math.NaN() }, ErrInvalidStrength},
+		{"confidence NaN", func(s *Signal) { s.Confidence = math.NaN() }, ErrInvalidConfidence},
+		{"metric +Inf", func(s *Signal) { s.Metrics = map[string]float64{"mean": math.Inf(1), "n": 12} }, ErrNonFiniteMetric},
+		{"metric -Inf", func(s *Signal) { s.Metrics = map[string]float64{"slope": math.Inf(-1)} }, ErrNonFiniteMetric},
+		{"metric NaN", func(s *Signal) { s.Metrics = map[string]float64{"r2": math.NaN()} }, ErrNonFiniteMetric},
+		{"evidence score NaN", func(s *Signal) {
+			s.Evidence = []Evidence{{Series: series, Time: now, Kind: "baseline_deviation", Score: math.NaN()}}
+		}, ErrNonFiniteMetric},
+		{"evidence metric +Inf", func(s *Signal) {
+			s.Evidence = []Evidence{{Series: series, Time: now, Kind: "baseline_deviation", Score: 2.5,
+				Metrics: map[string]float64{"z_score": math.Inf(1)}}}
+		}, ErrNonFiniteMetric},
+		{"explanation threshold NaN", func(s *Signal) { s.Explanation.ThresholdUsed = math.NaN() }, ErrNonFiniteMetric},
+		{"explanation feature value +Inf", func(s *Signal) {
+			s.Explanation.FeatureEvolution = []FeatureSample{{At: now, Value: math.Inf(1)}}
+		}, ErrNonFiniteMetric},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -190,5 +210,43 @@ func TestTimeWindow_Validate(t *testing.T) {
 	}
 	if err := (TimeWindow{Start: now, End: now.Add(-time.Second)}).Validate(); !errors.Is(err, ErrInvalidWindow) {
 		t.Errorf("inverted window not rejected: %v", err)
+	}
+}
+
+// TestSignal_Validate_NonFiniteMetricsAreUnrepresentable states the
+// reason the finiteness invariant exists, next to the invariant, so a
+// future reader does not read it as fussiness about float hygiene.
+//
+// encoding/json refuses non-finite floats and returns no bytes when it
+// does. Every SQL store writes Metrics as a JSON column, so one
+// unrepresentable key does not cost that key — it costs the map. The
+// test asserts both halves: json.Marshal fails on exactly the bag that
+// Validate now rejects, and the bytes it hands back are empty.
+func TestSignal_Validate_NonFiniteMetricsAreUnrepresentable(t *testing.T) {
+	metrics := map[string]float64{"mean": math.Inf(1), "n": 12}
+
+	b, err := json.Marshal(metrics)
+	if err == nil {
+		t.Fatal("json.Marshal accepted +Inf; the invariant guards a failure that no longer happens")
+	}
+	if len(b) != 0 {
+		t.Errorf("json.Marshal returned %d bytes alongside its error, want 0 — "+
+			"a partial encoding would have lost only the bad key, not the map", len(b))
+	}
+
+	now := time.Now()
+	sig := Signal{
+		ID:         uuid.New(),
+		ScopeID:    uuid.New(),
+		Series:     uuid.New(),
+		Pattern:    PatternTypeStall,
+		DetectedAt: now,
+		Window:     TimeWindow{Start: now.Add(-time.Hour), End: now},
+		Strength:   0.9,
+		Confidence: 0.8,
+		Metrics:    metrics,
+	}
+	if err := sig.Validate(); !errors.Is(err, ErrNonFiniteMetric) {
+		t.Fatalf("Validate() = %v, want ErrNonFiniteMetric", err)
 	}
 }

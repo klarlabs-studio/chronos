@@ -86,7 +86,7 @@ func (c *ChangePoint) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 		}
 		signals = append(signals, c.build(scopeID, series, observations, ys, bestK, bestShift))
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func (c *ChangePoint) build(scopeID, series uuid.UUID, observations []chronos.EntityState, ys []float64, k int, shift float64) domain.Signal {

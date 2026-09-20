@@ -13,6 +13,7 @@ package domain
 
 import (
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,28 @@ var (
 	ErrInvalidWindow      = errors.New("domain: window end must not precede window start")
 	ErrSignalNotFound     = errors.New("domain: signal not found")
 	ErrInvalidExplanation = errors.New("domain: explanation has invalid component (negative count or non-monotonic feature evolution)")
+
+	// ErrNonFiniteMetric rejects NaN, +Inf and -Inf anywhere in the
+	// numeric payload a signal carries: Signal.Metrics, each
+	// Evidence's Score and Metrics, and the Explanation's
+	// ThresholdUsed and feature-evolution values.
+	//
+	// The loss this prevents is silent and total. Every SQL store
+	// persists the metric bags as a JSON column, and encoding/json
+	// refuses non-finite floats: json.Marshal of
+	// map[string]float64{"mean": math.Inf(1), "n": 12} returns zero
+	// bytes and "json: unsupported value: +Inf". The stores discarded
+	// that error, so a single unrepresentable key did not cost one
+	// key — it wrote the whole map as an empty column, and the signal
+	// read back carrying no metrics at all rather than a metric
+	// flagged as bad. Nothing in the pipeline could tell that apart
+	// from a detector that surfaced no metrics.
+	//
+	// Rejecting here keeps the loss from arising. A detector whose
+	// arithmetic overflowed has not measured anything, and "no
+	// signal" is a valid result: a signal whose metrics cannot be
+	// represented is not a signal worth emitting.
+	ErrNonFiniteMetric = errors.New("domain: signal has a non-finite metric value (NaN or Inf)")
 )
 
 // PatternType is a typed enum for the kinds of patterns Chronos can
@@ -125,6 +148,17 @@ type Evidence struct {
 	Metrics map[string]float64
 }
 
+// Validate enforces that the evidence's numeric payload is
+// representable. Score and every Metrics value must be finite; see
+// [ErrNonFiniteMetric] for what a non-finite one costs on the way to
+// storage.
+func (e Evidence) Validate() error {
+	if !isFinite(e.Score) {
+		return ErrNonFiniteMetric
+	}
+	return validateMetricBag(e.Metrics)
+}
+
 // Signal is a structured description of a detected pattern. It is
 // presentation-neutral: no Title, no Summary, no Suggestion. Downstream
 // consumers interpret Signals into actions; Chronos only perceives.
@@ -153,7 +187,8 @@ type Signal struct {
 
 	// Metrics is a free-form bag of detector-specific measurements (e.g.
 	// "avg_similarity", "slope", "z_score"). Keys should be lowercase
-	// snake_case so downstream filters can reason about them.
+	// snake_case so downstream filters can reason about them. Values
+	// must be finite — see [ErrNonFiniteMetric].
 	Metrics map[string]float64
 
 	// Explanation carries detector-side context for narration: the
@@ -246,6 +281,14 @@ func (e Explanation) Validate() error {
 	if e.BaselineWindowDays < 0 {
 		return ErrInvalidExplanation
 	}
+	if !isFinite(e.ThresholdUsed) {
+		return ErrNonFiniteMetric
+	}
+	for i := range e.FeatureEvolution {
+		if !isFinite(e.FeatureEvolution[i].Value) {
+			return ErrNonFiniteMetric
+		}
+	}
 	for i := 1; i < len(e.FeatureEvolution); i++ {
 		if e.FeatureEvolution[i].At.Before(e.FeatureEvolution[i-1].At) {
 			return ErrInvalidExplanation
@@ -269,14 +312,44 @@ func (s Signal) Validate() error {
 	if s.Pattern == "" {
 		return ErrMissingPattern
 	}
-	if s.Strength < 0 || s.Strength > 1 {
+	// !isFinite first, and not folded into the range test: NaN < 0 and
+	// NaN > 1 are both false, so a range check on its own reports a NaN
+	// strength as in [0,1].
+	if !isFinite(s.Strength) || s.Strength < 0 || s.Strength > 1 {
 		return ErrInvalidStrength
 	}
-	if s.Confidence < 0 || s.Confidence > 1 {
+	if !isFinite(s.Confidence) || s.Confidence < 0 || s.Confidence > 1 {
 		return ErrInvalidConfidence
 	}
 	if err := s.Window.Validate(); err != nil {
 		return err
 	}
+	if err := validateMetricBag(s.Metrics); err != nil {
+		return err
+	}
+	for _, ev := range s.Evidence {
+		if err := ev.Validate(); err != nil {
+			return err
+		}
+	}
 	return s.Explanation.Validate()
+}
+
+// validateMetricBag rejects a metric map holding a value encoding/json
+// cannot represent. Map iteration order decides which key is found
+// first; the sentinel carries no key, so the result is deterministic
+// either way.
+func validateMetricBag(m map[string]float64) error {
+	for _, v := range m {
+		if !isFinite(v) {
+			return ErrNonFiniteMetric
+		}
+	}
+	return nil
+}
+
+// isFinite reports whether x is a real number — neither NaN nor an
+// infinity.
+func isFinite(x float64) bool {
+	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }

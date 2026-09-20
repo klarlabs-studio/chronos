@@ -3,6 +3,7 @@ package detect
 import (
 	"bytes"
 	"context"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -228,5 +229,69 @@ func TestEngine_RecordsDetectorMetrics(t *testing.T) {
 	}
 	if !strings.Contains(out, `chronos_signals_truncated_total{pattern="trend"}`) {
 		t.Errorf("missing truncation metric:\n%s", out)
+	}
+}
+
+// unvalidatedDetector emits whatever it is handed, valid or not. It
+// stands in for an out-of-tree detector: Detector is an interface, so
+// the engine cannot assume every implementation honours the contract
+// its doc comment states.
+type unvalidatedDetector struct {
+	pattern domain.PatternType
+	emit    []domain.Signal
+}
+
+func (d unvalidatedDetector) Pattern() domain.PatternType { return d.pattern }
+
+func (d unvalidatedDetector) Detect(context.Context, uuid.UUID, []chronos.EntityState) []domain.Signal {
+	return d.emit
+}
+
+// TestEngine_DropsSignalsThatFailValidate pins the engine's last gate
+// before the pipeline persists and the API serves.
+//
+// The in-tree detectors filter their own output, so this needs a
+// detector that does not. The engine drops the invalid signal and
+// keeps the valid one: it does not repair the invalid one, because it
+// has no basis on which to invent the quantity the detector failed to
+// measure, and it does not pass it on, because the next stop is a
+// store whose Save would reject it and a JSON encoder that cannot
+// represent it.
+func TestEngine_DropsSignalsThatFailValidate(t *testing.T) {
+	cfg := &config.Config{MaxSignalsPerRun: 100}
+	scope := uuid.New()
+	series := uuid.New()
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	mk := func(metrics map[string]float64) domain.Signal {
+		return domain.Signal{
+			ScopeID:    scope,
+			Series:     series,
+			Pattern:    domain.PatternTypeStall,
+			DetectedAt: now,
+			Window:     domain.TimeWindow{Start: now.Add(-time.Hour), End: now},
+			Strength:   0.9,
+			Confidence: 0.8,
+			Metrics:    metrics,
+		}
+	}
+	good := mk(map[string]float64{"mean": 4})
+	bad := mk(map[string]float64{"mean": math.Inf(1)})
+	if err := bad.Validate(); err == nil {
+		t.Fatal("the fixture meant to be invalid validates; the test proves nothing")
+	}
+
+	e := NewEngine(cfg, unvalidatedDetector{pattern: domain.PatternTypeStall, emit: []domain.Signal{good, bad}}).
+		WithCrossScopeDetectors(nil)
+	got := e.Detect(context.Background(), mkSeries(scope, series, now, []float64{1, 2, 3, 4}))
+
+	if len(got) != 1 {
+		t.Fatalf("got %d signals, want 1 — the invalid one should have been dropped", len(got))
+	}
+	if err := got[0].Validate(); err != nil {
+		t.Errorf("surviving signal does not validate: %v", err)
+	}
+	if math.IsInf(got[0].Metrics["mean"], 0) {
+		t.Error("the engine kept the signal with the infinite metric and dropped the finite one")
 	}
 }

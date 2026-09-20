@@ -67,7 +67,7 @@ func (c *Correlation) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 			signals = append(signals, sig)
 		}
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func (c *Correlation) pair(scopeID, idA, idB uuid.UUID, a, b []chronos.EntityState) (domain.Signal, bool) {

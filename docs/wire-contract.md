@@ -55,6 +55,8 @@ Consumers should switch on the `client.PatternType*` constants. New patterns wil
 
 Each detector emits a stable `Evidence.Kind` (single string) and a stable set of keys in `Signal.Metrics` and `Evidence.Metrics`. Future evolutions add keys; renames or removals are breaking changes.
 
+Every numeric value a signal carries — `Strength`, `Confidence`, `Evidence.Score`, and each value in `Signal.Metrics` and `Evidence.Metrics` — is a finite JSON number. A detector whose arithmetic overflows to `NaN` or an infinity emits no signal rather than an unrepresentable one, so a consumer never sees `null`, a string sentinel, or an empty metric bag standing in for a value that could not be encoded.
+
 ### Recurrence — `Pattern: "recurrence"`
 
 - **Evidence.Kind**: `similar_state` — one per peer state above the similarity threshold.

@@ -171,5 +171,5 @@ func (o *OutlierCluster) Detect(_ context.Context, scopeID uuid.UUID, states []c
 			Evidence: ev,
 		})
 	}
-	return signals
+	return keepValid(signals)
 }

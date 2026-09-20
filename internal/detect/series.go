@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/felixgeelhaar/chronos"
+	"github.com/felixgeelhaar/chronos/internal/domain"
 	"github.com/google/uuid"
 )
 
@@ -49,10 +50,12 @@ func sortedUUIDKeys[V any](m map[uuid.UUID]V) []uuid.UUID {
 
 // isFinite reports whether x is a real number — neither NaN nor an
 // infinity. Detectors use it to reject derived statistics that
-// overflowed: every comparison against NaN is false, so an
-// unguarded NaN slips through *all* threshold gates and lands in a
-// signal's Strength or Confidence, where domain.Signal.Validate also
-// accepts it (NaN < 0 and NaN > 1 are both false).
+// overflowed: every comparison against NaN is false, so an unguarded
+// NaN slips through *all* threshold gates and lands in a signal's
+// Strength, Confidence or Metrics. domain.Signal.Validate is the
+// backstop for that — it rejects non-finite quantities outright —
+// but a detector that waits for it has already decided to speak
+// about arithmetic that did not resolve.
 func isFinite(x float64) bool {
 	return !math.IsNaN(x) && !math.IsInf(x, 0)
 }
@@ -189,4 +192,29 @@ func autocorrelation(ys []float64, lag int) float64 {
 	}
 	n := len(ys) - lag
 	return pearsonCorrelation(ys[:n], ys[lag:lag+n])
+}
+
+// keepValid drops signals that do not satisfy domain.Signal.Validate,
+// returning the survivors in order.
+//
+// Every detector routes its output through this on the way out. The
+// Detector interface already promises the engine that returned signals
+// validate; before this the promise rested on each detector's own
+// arithmetic guards, and a gap in one of them produced a signal rather
+// than silence. Silence is the correct failure: a detector whose
+// statistics overflowed has established no evidence, and "no signal"
+// is a valid result.
+//
+// Returns nil rather than an empty slice when nothing survives, so a
+// detector filtered to nothing is indistinguishable from one that
+// never spoke.
+func keepValid(sigs []domain.Signal) []domain.Signal {
+	var out []domain.Signal
+	for _, s := range sigs {
+		if s.Validate() != nil {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
