@@ -127,6 +127,11 @@ func (s *Scheduler) Run(ctx context.Context) error {
 // retention is configured.
 const retentionSweepInterval = time.Hour
 
+// retentionBatchSize bounds one retention DELETE. Small enough that a
+// batch commits quickly and WAL recycles; large enough that clearing a
+// multi-million-row backlog does not take thousands of round trips.
+const retentionBatchSize = 1000
+
 // sweep deletes signals detected longer ago than the configured
 // retention, and does nothing at all when retention is disabled.
 //
@@ -147,18 +152,57 @@ func (s *Scheduler) sweep(ctx context.Context) {
 		return
 	}
 	cutoff := time.Now().Add(-s.retention)
-	n, err := retainer.DeleteSignalsOlderThan(ctx, cutoff)
-	switch {
-	case errors.Is(err, ports.ErrNotImplemented):
-		s.logger.Error("scheduler: signal retention configured but the store does not support it; signals will not be pruned",
-			"retention", s.retention)
-		return
-	case err != nil:
-		s.logger.Error("scheduler: signal retention sweep failed", "cutoff", cutoff, "err", err)
-		return
+
+	// Batched, not one statement. A store that accumulated before
+	// retention was switched on hands its entire backlog to the first
+	// sweep, and evidence cascades with each signal. Measured on a live
+	// deployment: 26,807 signals carrying ~19M evidence rows ran for
+	// nine minutes as a single DELETE, consuming ~64MB/min of WAL with
+	// nothing reclaimable until commit, and was minutes from exhausting
+	// the volume -- at which point it would have rolled back, having
+	// deleted nothing. The identical work in batches of 1000 did not
+	// move free space at all, because WAL recycles between commits.
+	//
+	// Loop until a sweep returns less than it asked for, so a large
+	// first pass finishes rather than leaving the remainder for an hour
+	// later, by which point it is an hour larger.
+	var total int64
+	for {
+		n, err := retainer.DeleteSignalsOlderThan(ctx, cutoff, retentionBatchSize)
+		switch {
+		case errors.Is(err, ports.ErrNotImplemented):
+			s.logger.Error("scheduler: signal retention configured but the store does not support it; signals will not be pruned",
+				"retention", s.retention)
+			return
+		case err != nil:
+			s.logger.Error("scheduler: signal retention sweep failed",
+				"cutoff", cutoff, "deleted_before_failure", total, "err", err)
+			return
+		}
+		total += n
+
+		// Progress is logged per batch rather than only at the end. A
+		// first sweep over a large backlog is the one an operator most
+		// wants to watch, and it is exactly the one that would otherwise
+		// say nothing for minutes.
+		if n > 0 {
+			s.logger.Info("scheduler: pruning signals past retention",
+				"batch", n, "total", total, "cutoff", cutoff)
+		}
+		if n < retentionBatchSize {
+			break
+		}
+		// Cancellation matters here: a long first sweep should stop at a
+		// batch boundary on shutdown rather than abandon a transaction.
+		select {
+		case <-ctx.Done():
+			s.logger.Info("scheduler: retention sweep interrupted", "deleted", total)
+			return
+		default:
+		}
 	}
-	if n > 0 {
-		s.logger.Info("scheduler: pruned signals past retention", "deleted", n, "cutoff", cutoff)
+	if total > 0 {
+		s.logger.Info("scheduler: pruned signals past retention", "deleted", total, "cutoff", cutoff)
 	}
 }
 

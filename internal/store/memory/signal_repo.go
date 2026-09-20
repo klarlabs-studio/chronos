@@ -81,13 +81,32 @@ func (r *SignalRepository) Count(_ context.Context, filter ports.SignalFilter) (
 }
 
 // DeleteSignalsOlderThan removes signals detected before cutoff.
-func (r *SignalRepository) DeleteSignalsOlderThan(_ context.Context, cutoff time.Time) (int64, error) {
+func (r *SignalRepository) DeleteSignalsOlderThan(_ context.Context, cutoff time.Time, limit int) (int64, error) {
 	r.conn.mu.Lock()
 	defer r.conn.mu.Unlock()
+	// Oldest first, so a bounded sweep makes progress from the far end
+	// rather than deleting an arbitrary subset and leaving the oldest
+	// rows behind forever.
+	order := make([]int, 0, len(r.conn.signals))
+	for i, sig := range r.conn.signals {
+		if sig.DetectedAt.Before(cutoff) {
+			order = append(order, i)
+		}
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		return r.conn.signals[order[a]].DetectedAt.Before(r.conn.signals[order[b]].DetectedAt)
+	})
+	if limit > 0 && len(order) > limit {
+		order = order[:limit]
+	}
+	doomed := make(map[int]struct{}, len(order))
+	for _, i := range order {
+		doomed[i] = struct{}{}
+	}
 	kept := r.conn.signals[:0]
 	var removed int64
-	for _, sig := range r.conn.signals {
-		if sig.DetectedAt.Before(cutoff) {
+	for i, sig := range r.conn.signals {
+		if _, ok := doomed[i]; ok {
 			removed++
 			continue
 		}

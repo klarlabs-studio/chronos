@@ -4,6 +4,38 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [0.14.0] - 2026-09-20
+
+### Fixed
+- **The retention sweep no longer deletes the whole backlog in one
+  transaction.** `DeleteSignalsOlderThan` issued a single unbounded
+  `DELETE`, and `Run` calls `sweep` immediately on start — so the
+  failure landed precisely where retention is most needed: a deployment
+  that enables it *after* accumulating, during a rolling restart.
+
+  Measured on a live deployment holding 36,209 signals and 25,940,060
+  evidence rows (~716 per signal, cascading via `ON DELETE CASCADE`):
+  26,807 eligible signals as one statement ran for nine minutes,
+  consuming ~64 MB/min of WAL with nothing reclaimable until commit. It
+  was minutes from exhausting the volume, at which point it would have
+  rolled back having deleted nothing, leaving the database read-only.
+
+  The identical deletion in batches of 1000 did not move free space at
+  all, because WAL recycles between commits.
+
+  `SignalRetainer.DeleteSignalsOlderThan` now takes a `limit`, honoured
+  by memory, sqlite, postgres and mysql — sqlite through a subquery,
+  since stock builds lack `SQLITE_ENABLE_UPDATE_DELETE_LIMIT`, and mysql
+  through `ORDER BY … LIMIT`. The scheduler loops until a batch returns
+  short, so a large first sweep finishes rather than leaving the
+  remainder for an hour later when it is an hour larger. Progress is
+  logged per batch, because the sweep an operator most wants to watch is
+  exactly the one that would otherwise say nothing for minutes. A
+  cancelled sweep stops at a batch boundary.
+
+  Two regression tests, both verified red: one fails if any delete is
+  issued unbounded, one if a cancelled sweep keeps going.
+
 ## [0.13.0] - 2026-09-19
 
 ### Changed
