@@ -4,6 +4,36 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [0.15.0] - 2026-09-20
+
+### Fixed
+- **Retention no longer blocks detection.** `Run` called `sweep` inline —
+  once before the loop, then on a second ticker inside the same
+  `select` — so a slow sweep produced exactly as much dead time as it
+  took, and the worst sweep of all (the first, facing whatever
+  accumulated before retention was enabled) sat directly in the startup
+  path, making a restart look like a hang.
+
+  Observed on a deployment carrying ~716 cascading evidence rows per
+  signal: one batch spent **23 minutes** in `IO/DataFileRead` without
+  committing, and the engine produced no detections for the whole of it.
+  Cancelling that single statement restored detection within seconds —
+  98 signals in the next three minutes — which is how the coupling was
+  found.
+
+  Detection and retention share nothing but the goroutine they ran on:
+  one reads observations, the other deletes aged signals. Retention now
+  runs on its own goroutine, and a test pins it by wedging a sweep open
+  and asserting a tick still completes.
+
+### Changed
+- **`retentionBatchSize` 1000 → 200.** The number that matters is not the
+  batch but what it multiplies into, and the engine cannot know the
+  ratio: at ~716 evidence rows per signal, 1000 signals is 716,000
+  cascaded deletions. 200 keeps that deployment near 143,000, which
+  commits in seconds. Smaller batches cost round trips and nothing else —
+  WAL recycles between commits either way.
+
 ## [0.14.0] - 2026-09-20
 
 ### Fixed
