@@ -13,21 +13,65 @@ import (
 // SignalRepository implements ports.SignalRepository in memory.
 type SignalRepository struct{ conn *Conn }
 
-// Save appends or replaces a signal by ID.
+// Save appends a signal, or updates one already stored under the same
+// ID.
+//
+// The update replaces what a re-run of the detector can revise — the
+// quantities, the explanation, the confidence class and the evidence —
+// and leaves the perception's identity alone: scope, series, pattern,
+// detected-at and the analysis window stay as first recorded. That is
+// the ON CONFLICT (id) column set every SQL backend uses, and a signal
+// is a historical fact, not a mutable row.
 func (r *SignalRepository) Save(_ context.Context, sig domain.Signal) error {
 	if err := sig.Validate(); err != nil {
 		return err
 	}
+	sig = normaliseSignalTimes(sig)
 	r.conn.mu.Lock()
 	defer r.conn.mu.Unlock()
 	for i, existing := range r.conn.signals {
 		if existing.ID == sig.ID {
-			r.conn.signals[i] = sig
+			existing.Strength = sig.Strength
+			existing.Confidence = sig.Confidence
+			existing.Metrics = sig.Metrics
+			existing.Explanation = sig.Explanation
+			existing.ConfidenceClass = sig.ConfidenceClass
+			existing.Evidence = sig.Evidence
+			r.conn.signals[i] = existing
 			return nil
 		}
 	}
 	r.conn.signals = append(r.conn.signals, sig)
 	return nil
+}
+
+// normaliseSignalTimes converts every timestamp on a signal to UTC.
+// The SQL backends do this on the way through their drivers, so the
+// in-memory store does it explicitly rather than handing back whatever
+// zone (and monotonic reading) the detector happened to carry.
+// Evidence and feature-evolution slices are copied before being
+// rewritten so the caller's own slice is left untouched.
+func normaliseSignalTimes(sig domain.Signal) domain.Signal {
+	sig.DetectedAt = sig.DetectedAt.UTC()
+	sig.Window.Start = sig.Window.Start.UTC()
+	sig.Window.End = sig.Window.End.UTC()
+	if len(sig.Evidence) > 0 {
+		evidence := make([]domain.Evidence, len(sig.Evidence))
+		copy(evidence, sig.Evidence)
+		for i := range evidence {
+			evidence[i].Time = evidence[i].Time.UTC()
+		}
+		sig.Evidence = evidence
+	}
+	if len(sig.Explanation.FeatureEvolution) > 0 {
+		samples := make([]domain.FeatureSample, len(sig.Explanation.FeatureEvolution))
+		copy(samples, sig.Explanation.FeatureEvolution)
+		for i := range samples {
+			samples[i].At = samples[i].At.UTC()
+		}
+		sig.Explanation.FeatureEvolution = samples
+	}
+	return sig
 }
 
 // List returns signals matching the filter, ordered detected-at desc

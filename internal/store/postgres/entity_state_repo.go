@@ -246,6 +246,12 @@ func scanEntityStates(rows *sql.Rows) ([]chronos.EntityState, error) {
 		if err := rows.Scan(&s.ID, &s.EntityID, &s.ScopeID, &s.Timestamp, &features, &labels, &meta); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
+		// pgx hands back a TIMESTAMPTZ in the client's local zone. The
+		// instant is right either way, but the rendered wall clock is
+		// not, and a consumer must not see a timestamp move because
+		// the operator switched backend or the server's TZ changed.
+		// Every other backend returns UTC; so does this one.
+		s.Timestamp = s.Timestamp.UTC()
 		_ = json.Unmarshal(features, &s.Features)
 		if len(labels) > 0 {
 			_ = json.Unmarshal(labels, &s.Labels)

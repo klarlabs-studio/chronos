@@ -4,6 +4,65 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [Unreleased]
+
+### Added
+- **A storage backend conformance suite** (`internal/store/conformance`),
+  run by all five backends — memory, SQLite, libSQL, PostgreSQL,
+  MySQL/MariaDB — from their own packages. 27 contract groups cover
+  persistence, ordering, filtering, duplicate IDs, duplicate timestamps,
+  out-of-order arrival, limits, timestamp fidelity, not-found versus
+  empty, retention and concurrency. Postgres and MySQL run it under the
+  existing `TEST_POSTGRES_DSN` / `TEST_MYSQL_DSN` gates and CI jobs.
+
+  Where backends disagree and the fix is not obviously safe, the suite
+  declares the divergence as a `Quirk` on the backend and asserts that
+  the divergence still reproduces exactly, so it can neither persist
+  unnoticed nor be repaired unnoticed.
+
+### Fixed
+- **PostgreSQL lost its namespace on every connection but the first.**
+  The schema was selected with `SET search_path`, which is a property of
+  one session, while the pool opens up to 25. Whichever connection
+  served `Open` could see the tables; every later one started on the
+  default search_path and failed with
+  `relation "entity_states" does not exist`. Single-threaded use hid it
+  because the pool kept handing back the one warm connection — in the
+  conformance suite's concurrency group, four writers and four readers
+  produced the error immediately. The namespace now travels as a
+  `search_path` startup parameter on the DSN, so every connection the
+  pool opens carries it.
+- **MySQL/MariaDB deadlocked under concurrent signal saves.** `Save`
+  clears a signal's evidence before re-inserting it, and under the
+  server's default REPEATABLE READ a `DELETE ... WHERE signal_id = ?`
+  matching no rows still takes a next-key lock on the gap it searched —
+  the same gap every other writer is inserting into. Measured on
+  MariaDB 11: 40 concurrent saves of unrelated signals, **30 lost** to
+  `Error 1213: Deadlock found`. The transaction now runs at READ
+  COMMITTED, which does not take those gap locks and which is
+  sufficient for a statement touching one signal and its own evidence.
+- **SQLite dropped `explanation` and `confidence_class` from `List`.**
+  Both columns were selected by `Get` and not by `List`, so the same
+  signal carried its explanation when fetched by ID and lost it when
+  returned in a list.
+- **libSQL in local-file mode dropped writes under concurrency.** The
+  provider reuses the SQLite repositories but not the single-connection
+  pool they were written for, so concurrent writers hit `SQLITE_BUSY`
+  and the write was lost rather than retried: 80 concurrent ingests
+  landed 20 rows. Local-file mode now caps the pool at one connection,
+  as the SQLite provider does. Remote databases keep the default pool.
+- **The in-memory store now matches the SQL backends** on three points
+  where it was the odd one out: a repeated `Ingest` of the same
+  observation ID is an idempotent update rather than a second row; a
+  repeated `Save` of the same signal ID revises the detector's
+  quantities and evidence rather than rewriting the perception's
+  identity; and a batch `Save` containing an invalid observation now
+  writes none of the batch instead of everything before the bad row.
+- **Timestamps come back in UTC from every backend.** pgx returns
+  `TIMESTAMPTZ` in the client's local zone and the in-memory store
+  returned whatever zone the caller supplied, so the same instant
+  rendered differently depending on backend and on the machine's `TZ`.
+
 ## [0.16.0] - 2026-09-20
 
 ### Added

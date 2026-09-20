@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -72,6 +73,38 @@ func TestParseDSN(t *testing.T) {
 				t.Errorf("driver DSN should preserve scheme: %s", got.Driver)
 			}
 		})
+	}
+}
+
+// TestParseDSN_CarriesNamespaceAsSearchPath pins the fix for a bug the
+// storage conformance suite caught: the namespace has to reach every
+// connection the pool opens, not just whichever one served Open. A
+// `SET search_path` statement is per-session, so the second pooled
+// connection saw the default search_path and every query on it failed
+// with `relation "entity_states" does not exist`. Carrying it as a
+// startup runtime parameter in the DSN puts it on all of them.
+func TestParseDSN_CarriesNamespaceAsSearchPath(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"postgres://h/db", "chronos"},
+		{"postgres://h/db?namespace=tenant_a", "tenant_a"},
+		// No credentials in this fixture on purpose: the security scan
+		// flags a user:password pair in a DSN literal, and this case is
+		// about the query string, not about auth.
+		{"postgresql://h:5432/db?sslmode=require&namespace=tenant_b", "tenant_b"},
+	}
+	for _, tc := range cases {
+		got, err := parseDSN(tc.in)
+		if err != nil {
+			t.Fatalf("parseDSN(%q): %v", tc.in, err)
+		}
+		u, err := url.Parse(got.Driver)
+		if err != nil {
+			t.Fatalf("driver dsn %q is not a URL: %v", got.Driver, err)
+		}
+		if sp := u.Query().Get("search_path"); sp != tc.want {
+			t.Errorf("parseDSN(%q) driver search_path = %q, want %q (dsn: %s)",
+				tc.in, sp, tc.want, got.Driver)
+		}
 	}
 }
 

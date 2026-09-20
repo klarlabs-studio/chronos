@@ -22,7 +22,19 @@ func (r *SignalRepository) Save(ctx context.Context, sig domain.Signal) error {
 	if err := sig.Validate(); err != nil {
 		return err
 	}
-	tx, err := r.conn.DB.BeginTx(ctx, nil)
+	// READ COMMITTED, not the server's REPEATABLE READ default.
+	//
+	// Save clears the signal's evidence before re-inserting it. Under
+	// REPEATABLE READ, `DELETE FROM signal_evidence WHERE signal_id = ?`
+	// that matches no rows still takes a next-key lock on the gap it
+	// searched in idx_signal_evidence — on an empty or sparse index
+	// that is the gap every other writer is about to insert into, and
+	// four goroutines saving four unrelated signals deadlock against
+	// each other. Measured on MariaDB 11: 40 concurrent saves, 30 lost
+	// to `Error 1213: Deadlock found`. READ COMMITTED does not take
+	// those gap locks, and this transaction does not need them: it
+	// touches one signal row and that signal's own evidence.
+	tx, err := r.conn.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return fmt.Errorf("signal save: begin: %w", err)
 	}
