@@ -2,7 +2,7 @@
 
 ## Project intent
 
-Chronos is the **Time / Pattern Perception** layer of the cognitive stack ([Mnemos / **Chronos** / agent runtimes](docs/cognitive-stack.md)). It ingests time-series observations from any source and emits **signals** — structured records describing patterns: `Recurrence`, `Trend`, `Spike`, `Drop`, `Stall`, `Anomaly`, `Seasonality`, `Correlation`, `ChangePoint`, `OutlierCluster`, `CrossScopeCorrelation`.
+Chronos is the **Time / Pattern Perception** layer of the cognitive stack ([Mnemos / **Chronos** / agent runtimes](docs/cognitive-stack.md)). It ingests time-series observations from any source and emits **signals** — structured records describing patterns: `Recurrence`, `Trend`, `Spike`, `Drop`, `Stall`, `Anomaly`, `Seasonality`, `Correlation`, `ChangePoint`, `OutlierCluster`, `CrossScopeCorrelation`, `Oscillation`, `Divergence`, `Convergence`.
 
 The single hardest rule: **signals, not opinions.** Chronos perceives; it does not interpret. There is no Title, no Summary, no Suggestion, no dismissal workflow, no feedback. Those concerns belong to agent runtimes (decisions) and Mnemos (knowledge), respectively.
 

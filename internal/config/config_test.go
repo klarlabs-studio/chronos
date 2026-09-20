@@ -152,6 +152,12 @@ func TestValidate_RejectsEachInvariant(t *testing.T) {
 		{"outlier cluster z < 0", func(c *Config) { c.OutlierClusterZ = -1 }, "outlier cluster z"},
 		{"cross-scope min > 1", func(c *Config) { c.CrossScopeMin = 1.5 }, "cross-scope min"},
 		{"cross-scope min points < 3", func(c *Config) { c.CrossScopeMinPoints = 2 }, "cross-scope min points"},
+		{"oscillation flip rate > 1", func(c *Config) { c.OscillationMinFlipRate = 1.5 }, "oscillation min flip rate"},
+		{"oscillation min points < 4", func(c *Config) { c.OscillationMinPoints = 3 }, "oscillation min points"},
+		{"divergence slope < 0", func(c *Config) { c.DivergenceMinSlope = -1 }, "divergence min slope"},
+		{"divergence min points < 3", func(c *Config) { c.DivergenceMinPoints = 2 }, "divergence min points"},
+		{"convergence slope < 0", func(c *Config) { c.ConvergenceMinSlope = -1 }, "convergence min slope"},
+		{"convergence min points < 3", func(c *Config) { c.ConvergenceMinPoints = 2 }, "convergence min points"},
 		{"confidence established < 0", func(c *Config) { c.ConfidenceClassEstablished = -1 }, "confidence established"},
 		{"confidence strong < 0", func(c *Config) { c.ConfidenceClassStrong = -1 }, "confidence strong"},
 	}

@@ -34,6 +34,12 @@ func patternTypeToDomain(p chronosv1.PatternType) domain.PatternType {
 		return domain.PatternTypeOutlierCluster
 	case chronosv1.PatternType_PATTERN_TYPE_CROSS_SCOPE_CORRELATION:
 		return domain.PatternTypeCrossScopeCorrelation
+	case chronosv1.PatternType_PATTERN_TYPE_OSCILLATION:
+		return domain.PatternTypeOscillation
+	case chronosv1.PatternType_PATTERN_TYPE_DIVERGENCE:
+		return domain.PatternTypeDivergence
+	case chronosv1.PatternType_PATTERN_TYPE_CONVERGENCE:
+		return domain.PatternTypeConvergence
 	default:
 		return ""
 	}
@@ -64,6 +70,12 @@ func patternTypeFromDomain(p domain.PatternType) chronosv1.PatternType {
 		return chronosv1.PatternType_PATTERN_TYPE_OUTLIER_CLUSTER
 	case domain.PatternTypeCrossScopeCorrelation:
 		return chronosv1.PatternType_PATTERN_TYPE_CROSS_SCOPE_CORRELATION
+	case domain.PatternTypeOscillation:
+		return chronosv1.PatternType_PATTERN_TYPE_OSCILLATION
+	case domain.PatternTypeDivergence:
+		return chronosv1.PatternType_PATTERN_TYPE_DIVERGENCE
+	case domain.PatternTypeConvergence:
+		return chronosv1.PatternType_PATTERN_TYPE_CONVERGENCE
 	default:
 		return chronosv1.PatternType_PATTERN_TYPE_UNSPECIFIED
 	}

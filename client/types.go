@@ -145,4 +145,7 @@ const (
 	PatternTypeChangePoint           = "change_point"
 	PatternTypeOutlierCluster        = "outlier_cluster"
 	PatternTypeCrossScopeCorrelation = "cross_scope_correlation"
+	PatternTypeOscillation           = "oscillation"
+	PatternTypeDivergence            = "divergence"
+	PatternTypeConvergence           = "convergence"
 )

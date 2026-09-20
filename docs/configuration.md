@@ -36,6 +36,12 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_CROSS_SCOPE_MIN` | `0.8` | CrossScopeCorrelation | Minimum \|Pearson r\| across scopes. |
 | `CHRONOS_CROSS_SCOPE_MIN_POINTS` | `5` | CrossScopeCorrelation | Minimum aligned observations between two series. |
 | `CHRONOS_ANONYMIZE_CROSS_SCOPE` | `false` | CrossScopeCorrelation | Replace scope/series ids with UUIDv5 hashes on cross-scope signals. |
+| `CHRONOS_OSCILLATION_MIN_FLIP_RATE` | `0.55` | Oscillation | Minimum sign-flip rate among meaningful first-differences. |
+| `CHRONOS_OSCILLATION_MIN_POINTS` | `6` | Oscillation | Minimum observations. |
+| `CHRONOS_DIVERGENCE_MIN_SLOPE` | `0.05` | Divergence | Minimum positive OLS slope of \|a−b\| (outcome units per aligned step). |
+| `CHRONOS_DIVERGENCE_MIN_POINTS` | `5` | Divergence | Minimum aligned observations between two series. |
+| `CHRONOS_CONVERGENCE_MIN_SLOPE` | `0.05` | Convergence | Minimum \|negative\| OLS slope of \|a−b\|. |
+| `CHRONOS_CONVERGENCE_MIN_POINTS` | `5` | Convergence | Minimum aligned observations between two series. |
 | `CHRONOS_CONFIDENCE_ESTABLISHED` | `2.0` | all detectors | MIN_POINTS multiplier for `confidence_class=established`. |
 | `CHRONOS_CONFIDENCE_STRONG` | `5.0` | all detectors | MIN_POINTS multiplier for `confidence_class=strong`. |
 | `CHRONOS_DETECTOR_PARALLELISM` | `false` | Engine | Run per-scope detectors in parallel goroutines. Off by default (deterministic ordering); flip on for many-scope deployments. |

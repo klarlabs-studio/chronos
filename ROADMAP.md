@@ -10,7 +10,7 @@ The authoritative product Intent — principles, detector acceptance criteria, a
 
 **Core engine.**
 - `internal/domain` — `Signal`, `Evidence`, `TimeWindow`, `PatternType`, validation, normalization.
-- `internal/detect` Engine + eleven detectors: Recurrence, Trend, Spike, Drop, Stall, Anomaly, Seasonality, Correlation, ChangePoint, OutlierCluster, plus CrossScopeCorrelation.
+- `internal/detect` Engine + fourteen detectors: Recurrence, Trend, Spike, Drop, Stall, Anomaly, Seasonality, Correlation, ChangePoint, OutlierCluster, Oscillation, Divergence, Convergence, plus CrossScopeCorrelation.
 - `internal/pipeline.Compute` — orchestration: fetch → save → detect → save signals.
 - `internal/similarity` — cosine, weighted, Euclidean.
 
@@ -47,7 +47,7 @@ Shipped items from earlier roadmap slices stay checked in git history; they are 
 
 ### 1. Intent P2 — contract consistency
 
-Keep README, package comments, ADRs, CI claims, and [`docs/wire-contract.md`](docs/wire-contract.md) aligned with executable behavior. Treat documentation drift as a defect. Prefer Observation → Detection → Signal language; do not reintroduce “insight / alert / recommendation” vocabulary in engine docs.
+Keep README, package comments, ADRs, CI claims, and [`docs/wire-contract.md`](docs/wire-contract.md) aligned with executable behavior. Treat documentation drift as a defect. Prefer Observation → Detection → Signal language; do not reintroduce “insight / alert / recommendation” vocabulary in engine docs. Ongoing maintenance — not a discrete open feature.
 
 ### 2. Intent P2 — embeddability
 
@@ -71,7 +71,8 @@ Both are out-of-tree adapters. This roadmap tracks them only as expected use cas
 
 ### 5. New detectors
 
-Only after the hardening track above. Each candidate must meet the [detector acceptance criteria](docs/intent.md#detector-acceptance-criteria) in the Intent. “No signal” under degenerate input is required.
+Oscillation, Divergence, and Convergence shipped (Intent shape catalog).
+Further candidates must meet the [detector acceptance criteria](docs/intent.md#detector-acceptance-criteria). “No signal” under degenerate input is required. Plateaus are covered by Stall.
 
 ## Non-goals
 

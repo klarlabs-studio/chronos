@@ -29,7 +29,7 @@ gRPC RPCs match the HTTP surface additively: unary `Ingest` + `IngestBatch`, `Li
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`.
+Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`, `oscillation-v1`, `divergence-v1`, `convergence-v1`.
 
 ## Pattern enum
 
@@ -48,6 +48,9 @@ Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `dro
 | `change_point`  | `client.PatternTypeChangePoint`   | ChangePoint    |
 | `outlier_cluster` | `client.PatternTypeOutlierCluster` | OutlierCluster |
 | `cross_scope_correlation` | `client.PatternTypeCrossScopeCorrelation` | CrossScopeCorrelation |
+| `oscillation`   | `client.PatternTypeOscillation`   | Oscillation    |
+| `divergence`    | `client.PatternTypeDivergence`    | Divergence     |
+| `convergence`   | `client.PatternTypeConvergence`   | Convergence    |
 
 Consumers should switch on the `client.PatternType*` constants. New patterns will be added with new string values; consumers using a closed switch on a typed enum will surface unknown patterns naturally.
 
@@ -79,6 +82,9 @@ Unless noted otherwise, Confidence is `strength × sampleFactor(n, saturate)`, w
 | `change_point` | scaled standardised shift (Inf → 1.0) | `strength × sampleFactor(n, 2×ChangePointMinPoints)` | `n` vs `ChangePointMinPoints` |
 | `outlier_cluster` | how far `member_count` exceeds the floor | `strength × sampleFactor(members, 2×OutlierClusterMinSeries)` | member count vs `OutlierClusterMinSeries` |
 | `cross_scope_correlation` | `\|r\|` | `\|r\| × sampleFactor(n, 2×CrossScopeMinPoints)` | aligned `n` vs `CrossScopeMinPoints` (≥ 3) |
+| `oscillation` | sign-flip rate among meaningful first-differences | `strength × sampleFactor(n, 2×OscillationMinPoints)` | `n` vs `OscillationMinPoints` |
+| `divergence` | scaled positive gap slope × fit quality | `strength × sampleFactor(n, 2×DivergenceMinPoints)` | aligned `n` vs `DivergenceMinPoints` (≥ 3) |
+| `convergence` | scaled \|negative\| gap slope × fit quality | `strength × sampleFactor(n, 2×ConvergenceMinPoints)` | aligned `n` vs `ConvergenceMinPoints` (≥ 3) |
 
 **Trend axis.** Trend regresses outcome against **wall-clock hours since window start** (`trend-v2`). Slope units are outcome-units per hour. Irregular sampling therefore changes the fitted slope (and typically R²) relative to a regularly spaced series with the same outcome values. Equal timestamps collapse the x-axis and yield no signal.
 
@@ -205,6 +211,41 @@ Two series in DIFFERENT scopes that move together. Same-scope pairs are handled 
 - **Evidence.Kind**: `cross_scope_pair` — exactly one row, pointing at the partner series.
 - **Evidence.Score**: `|r|`.
 - **Signal.Metrics**: same shape as `correlation` (`r`, `abs_r`, `n`, `direction`).
+
+### Oscillation — `Pattern: "oscillation"`
+
+Repeated direction reversals in a single series' outcome. Distinct from Seasonality (periodic autocorrelation peak) and Stall (too few meaningful differences to accumulate flips).
+
+- **Evidence.Kind**: `sign_flip_rate` — one record for the analysis window.
+- **Evidence.Score**: flip rate in `[0, 1]`.
+- **Signal.Metrics** / **Evidence.Metrics**:
+  - `flip_rate` — flips / consecutive meaningful first-difference pairs.
+  - `flips` — count of sign changes.
+  - `pairs` — number of consecutive meaningful difference pairs considered.
+  - `n` — observation count.
+
+### Divergence — `Pattern: "divergence"`
+
+Two series in the same scope whose absolute outcome gap is growing. OLS slope of `|a−b|` against ordinal index over the aligned tail.
+
+- **Series**: lex-smaller entity ID.
+- **Evidence.Kind**: `pair_divergence` — one row pointing at the partner.
+- **Evidence.Score**: `|slope|`.
+- **Signal.Metrics** / **Evidence.Metrics**:
+  - `slope` — signed OLS slope of the absolute gap (positive).
+  - `abs_slope` — `|slope|`.
+  - `r2` — coefficient of determination of the gap fit.
+  - `start_gap`, `end_gap` — absolute gap at the first/last aligned point.
+  - `n` — aligned observation count.
+
+### Convergence — `Pattern: "convergence"`
+
+Mirror of Divergence: absolute outcome gap is shrinking (negative slope).
+
+- **Series**: lex-smaller entity ID.
+- **Evidence.Kind**: `pair_convergence` — one row pointing at the partner.
+- **Evidence.Score**: `|slope|`.
+- **Signal.Metrics** / **Evidence.Metrics**: same keys as Divergence (`slope` is negative).
 
 ## Sort order
 

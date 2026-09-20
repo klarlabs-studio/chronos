@@ -56,6 +56,9 @@ enum PatternType {
   PATTERN_TYPE_CHANGE_POINT = 9;
   PATTERN_TYPE_OUTLIER_CLUSTER = 10;
   PATTERN_TYPE_CROSS_SCOPE_CORRELATION = 11;
+  PATTERN_TYPE_OSCILLATION = 12;
+  PATTERN_TYPE_DIVERGENCE = 13;
+  PATTERN_TYPE_CONVERGENCE = 14;
 }
 
 // EntityState is a single observation of an entity at a point in time.

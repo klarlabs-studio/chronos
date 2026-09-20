@@ -385,6 +385,12 @@ func patternTypeFromString(s string) chronosv1.PatternType {
 		return chronosv1.PatternType_PATTERN_TYPE_OUTLIER_CLUSTER
 	case PatternTypeCrossScopeCorrelation:
 		return chronosv1.PatternType_PATTERN_TYPE_CROSS_SCOPE_CORRELATION
+	case PatternTypeOscillation:
+		return chronosv1.PatternType_PATTERN_TYPE_OSCILLATION
+	case PatternTypeDivergence:
+		return chronosv1.PatternType_PATTERN_TYPE_DIVERGENCE
+	case PatternTypeConvergence:
+		return chronosv1.PatternType_PATTERN_TYPE_CONVERGENCE
 	default:
 		return chronosv1.PatternType_PATTERN_TYPE_UNSPECIFIED
 	}
@@ -415,6 +421,12 @@ func patternTypeToString(p chronosv1.PatternType) string {
 		return PatternTypeOutlierCluster
 	case chronosv1.PatternType_PATTERN_TYPE_CROSS_SCOPE_CORRELATION:
 		return PatternTypeCrossScopeCorrelation
+	case chronosv1.PatternType_PATTERN_TYPE_OSCILLATION:
+		return PatternTypeOscillation
+	case chronosv1.PatternType_PATTERN_TYPE_DIVERGENCE:
+		return PatternTypeDivergence
+	case chronosv1.PatternType_PATTERN_TYPE_CONVERGENCE:
+		return PatternTypeConvergence
 	default:
 		return ""
 	}

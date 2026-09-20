@@ -22,6 +22,10 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   receivers; package-level `Register` / `Open` / `SupportedSchemes`
   delegate to `DefaultRegistry()`. Duplicate schemes still panic.
   `embed.WithStoreRegistry` opens storage against an isolated registry.
+- **Oscillation, Divergence, Convergence detectors** — Intent shape
+  catalog completion. Proto enum values 12–14; wire evidence kinds
+  `sign_flip_rate`, `pair_divergence`, `pair_convergence`. Plateaus
+  remain Stall (documented).
 - **Per-detector Strength / Confidence table** in
   [`docs/wire-contract.md`](docs/wire-contract.md).
 - **Embed temporal-contract integration test** — out-of-order ingest,
