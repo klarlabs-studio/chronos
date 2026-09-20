@@ -227,31 +227,47 @@ func ensureSchema(db *sql.DB) error {
 // fixed form are left untouched. Required so databases written before
 // the format change keep chronological ORDER BY / range predicates.
 func normalizeTimestampText(db *sql.DB) error {
-	type col struct {
-		table, column, pk string
+	// Fixed statements only — identifiers are not taken from callers,
+	// so gosec G201 does not apply.
+	steps := []struct {
+		selectSQL string
+		updateSQL string
+	}{
+		{
+			`SELECT id, timestamp FROM entity_states`,
+			`UPDATE entity_states SET timestamp = ? WHERE id = ?`,
+		},
+		{
+			`SELECT id, detected_at FROM signals`,
+			`UPDATE signals SET detected_at = ? WHERE id = ?`,
+		},
+		{
+			`SELECT id, window_start FROM signals`,
+			`UPDATE signals SET window_start = ? WHERE id = ?`,
+		},
+		{
+			`SELECT id, window_end FROM signals`,
+			`UPDATE signals SET window_end = ? WHERE id = ?`,
+		},
+		{
+			`SELECT rowid, time FROM signal_evidence`,
+			`UPDATE signal_evidence SET time = ? WHERE rowid = ?`,
+		},
 	}
-	cols := []col{
-		{"entity_states", "timestamp", "id"},
-		{"signals", "detected_at", "id"},
-		{"signals", "window_start", "id"},
-		{"signals", "window_end", "id"},
-		{"signal_evidence", "time", "rowid"},
-	}
-	for _, c := range cols {
-		if err := normalizeColumn(db, c.table, c.column, c.pk); err != nil {
+	for _, s := range steps {
+		if err := normalizeColumn(db, s.selectSQL, s.updateSQL); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func normalizeColumn(db *sql.DB, table, column, pk string) error {
-	q := fmt.Sprintf(`SELECT %s, %s FROM %s`, pk, column, table)
-	rows, err := db.Query(q)
+func normalizeColumn(db *sql.DB, selectSQL, updateSQL string) error {
+	rows, err := db.Query(selectSQL)
 	if err != nil {
-		return fmt.Errorf("%s.%s select: %w", table, column, err)
+		return fmt.Errorf("normalize select: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type upd struct {
 		id   any
@@ -277,10 +293,9 @@ func normalizeColumn(db *sql.DB, table, column, pk string) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	stmt := fmt.Sprintf(`UPDATE %s SET %s = ? WHERE %s = ?`, table, column, pk)
 	for _, u := range updates {
-		if _, err := db.Exec(stmt, u.next, u.id); err != nil {
-			return fmt.Errorf("%s.%s update: %w", table, column, err)
+		if _, err := db.Exec(updateSQL, u.next, u.id); err != nil {
+			return fmt.Errorf("normalize update: %w", err)
 		}
 	}
 	return nil
