@@ -150,9 +150,10 @@ func advIrregularOffsets(n int) []time.Duration {
 // satisfy domain.Signal.Validate, which is what the Detector
 // interface promises the engine.
 //
-// domain.Signal.Validate does NOT catch NaN on its own — `NaN < 0`
-// and `NaN > 1` are both false — so the finiteness check here is
-// load-bearing and must stay separate from the Validate call.
+// The explicit finiteness and range checks are kept alongside the
+// Validate call rather than folded into it. They say what this file
+// means by a sane signal in the file that asserts it, and they fail
+// naming the field and its value, which a sentinel error does not.
 func advAssertSane(t *testing.T, sigs []domain.Signal) {
 	t.Helper()
 	for i, s := range sigs {
@@ -391,8 +392,10 @@ func TestStall_Adversarial(t *testing.T) {
 			"StallMinPoints is 4"},
 		{"exactly at minimum", advConst(7, 4), 1,
 			"four points is the documented floor"},
-		{"huge constant", advConst(advHuge, 12), 1,
-			"normalising MaxFloat64 by itself gives an exact 1.0 for every point"},
+		{"huge constant", advConst(advHuge, 12), 0,
+			"the normalised series is exactly flat, but metrics[mean] is the mean of the " +
+				"raw values, which overflows to +Inf; a signal whose metrics cannot be " +
+				"represented is not emitted"},
 		{"denormal constant", advConst(advDenormal, 12), 1,
 			"subnormal values normalise to 1.0 as cleanly as any other constant"},
 		{"denormal baseline, unit rest", append([]float64{advDenormal}, advConst(1, 11)...), 0,
@@ -989,34 +992,42 @@ func TestFinding_AnomalyCallsZeroVectorsIsolated(t *testing.T) {
 	advAssertSane(t, got)
 }
 
-// TestFinding_NonFiniteMetricsSurviveIntoSignals records that the
-// finiteness guards cover Strength and Confidence but not the
-// Metrics map. A stall over a series of MaxFloat64 values emits a
-// perfectly valid signal whose metrics["mean"] is +Inf.
+// TestStallIsSilentWhenItsMetricsOverflow pins the resolution of a
+// finding this file previously only recorded: the finiteness guards
+// covered Strength and Confidence but not the Metrics map, so a stall
+// over twelve MaxFloat64 observations emitted a signal that passed
+// Validate carrying metrics["mean"] = +Inf.
 //
-// This matters downstream: every store does
-// `metricsJSON, _ := json.Marshal(sig.Metrics)` and discards the
-// error. encoding/json refuses +Inf, so the marshal fails, the
-// discarded error hides it, and the signal is persisted with an
-// empty metrics column — the whole map is lost, not just the one
-// key. Fixing it means deciding whether domain.Signal.Validate
-// should reject non-finite metrics, which changes the Signal
-// contract, so the behaviour is recorded rather than changed here.
-func TestFinding_NonFiniteMetricsSurviveIntoSignals(t *testing.T) {
+// The cost was downstream and silent. Every SQL store did
+// `metricsJSON, _ := json.Marshal(sig.Metrics)`; encoding/json refuses
+// +Inf and returns zero bytes with the error, so the discarded error
+// wrote an empty metrics column — the whole map lost, not the one key,
+// and indistinguishable afterwards from a detector that surfaced no
+// metrics at all.
+//
+// domain.Signal.Validate now rejects non-finite metrics, and detectors
+// drop what will not validate rather than emit it. The stall is real —
+// the normalised series is exactly flat — but the mean of the raw
+// values is not a number this process can carry, so the correct output
+// is no signal.
+//
+// The check on the raw arithmetic is kept: if mean() stops overflowing,
+// this test is measuring nothing and should be re-derived rather than
+// left passing for the wrong reason.
+func TestStallIsSilentWhenItsMetricsOverflow(t *testing.T) {
 	scope := uuid.New()
-	got := NewStall(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, advConst(advHuge, 12)))
-	if len(got) != 1 {
-		t.Fatalf("got %d signals, want 1", len(got))
+	ys := advConst(advHuge, 12)
+
+	if !math.IsInf(mean(ys), 1) {
+		t.Fatalf("mean of twelve MaxFloat64 values = %v, want +Inf — the overflow this test rests on is gone", mean(ys))
 	}
-	s := got[0]
-	if err := s.Validate(); err != nil {
-		t.Fatalf("Validate() = %v, want nil — the signal is valid by the current contract", err)
+	if _, err := json.Marshal(map[string]float64{"mean": mean(ys)}); err == nil {
+		t.Fatal("json.Marshal accepted +Inf; the data loss this guard prevents no longer happens")
 	}
-	if !math.IsInf(s.Metrics["mean"], 1) {
-		t.Fatalf("metrics[mean] = %v, want +Inf — this test exists to record that it is not finite", s.Metrics["mean"])
-	}
-	if _, err := json.Marshal(s.Metrics); err == nil {
-		t.Errorf("json.Marshal(metrics) = nil error, want the +Inf rejection that the stores discard")
+
+	got := NewStall(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, ys))
+	if len(got) != 0 {
+		t.Fatalf("got %d signals, want 0 — metrics[mean] = %v cannot be persisted", len(got), got[0].Metrics["mean"])
 	}
 }
 
@@ -1024,12 +1035,17 @@ func TestFinding_NonFiniteMetricsSurviveIntoSignals(t *testing.T) {
 // when Detect is handed descending timestamps.
 //
 // The Detector interface states the states slice is "guaranteed to be
-// sorted by Timestamp ascending", and the engine does sort it, so
-// this is a precondition violation rather than a bug. It is recorded
-// because the failure is silent and total: the detector emits a
-// signal whose window runs backwards and whose feature evolution is
-// non-monotonic, and that signal fails its own Validate — the one
-// thing the same interface comment says returned signals must not do.
+// sorted by Timestamp ascending", and the engine does sort it, so this
+// is a precondition violation rather than a bug. What it used to
+// produce was a signal whose window ran backwards and whose feature
+// evolution was non-monotonic — a signal failing its own Validate, the
+// one thing the same interface comment says returned signals must not
+// do. Detectors now drop what will not validate, so the violation
+// costs the signal instead of corrupting it.
+//
+// It stays a finding because the loss is still silent: a caller
+// feeding descending data gets an empty slice and no indication that
+// its input, rather than its data, is the reason.
 func TestFinding_DetectorsRequireChronologicalInput(t *testing.T) {
 	scope := uuid.New()
 	descending := advSeries(scope, uuid.New(), -time.Minute, advRamp(16, 1, 1))
@@ -1037,21 +1053,21 @@ func TestFinding_DetectorsRequireChronologicalInput(t *testing.T) {
 	detectors := []Detector{
 		NewTrend(advCfg()), NewStall(advCfg()), NewChangePoint(advCfg()), NewSeasonality(advCfg()),
 	}
-	invalid := 0
 	for _, d := range detectors {
-		for _, s := range d.Detect(context.Background(), scope, descending) {
-			if s.Validate() != nil {
-				invalid++
-			}
+		got := d.Detect(context.Background(), scope, descending)
+		if len(got) != 0 {
+			t.Errorf("%s: got %d signals from descending input, want 0 — "+
+				"every signal it can build here has an inverted window", d.Pattern(), len(got))
 		}
-	}
-	if invalid == 0 {
-		t.Fatal("no invalid signals from descending input: the precondition this test records no longer bites")
 	}
 
 	// The engine restores the precondition, so the same states routed
-	// through Detect produce only valid signals.
-	for _, s := range NewEngine(advCfg()).WithCrossScopeDetectors(nil).Detect(context.Background(), descending) {
+	// through Detect are perceived normally and validate.
+	routed := NewEngine(advCfg()).WithCrossScopeDetectors(nil).Detect(context.Background(), descending)
+	if len(routed) == 0 {
+		t.Fatal("engine returned no signals for a clean ramp: the sort that restores the precondition is gone")
+	}
+	for _, s := range routed {
 		if err := s.Validate(); err != nil {
 			t.Errorf("engine-routed signal invalid: %v", err)
 		}

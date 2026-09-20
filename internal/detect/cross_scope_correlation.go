@@ -104,7 +104,7 @@ func (c *CrossScopeCorrelation) CrossDetect(_ context.Context, states []chronos.
 			signals = append(signals, c.build(a, b, r, n, groups[a], groups[b]))
 		}
 	}
-	return signals
+	return keepValid(signals)
 }
 
 func (c *CrossScopeCorrelation) build(a, b scopedSeriesKey, r float64, n int, sa, sb []chronos.EntityState) domain.Signal {

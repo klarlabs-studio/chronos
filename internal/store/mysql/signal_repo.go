@@ -40,9 +40,9 @@ func (r *SignalRepository) Save(ctx context.Context, sig domain.Signal) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	metricsJSON, _ := json.Marshal(sig.Metrics)
-	if metricsJSON == nil {
-		metricsJSON = []byte(`{}`)
+	metricsJSON, err := encodeMetrics(sig.Metrics)
+	if err != nil {
+		return fmt.Errorf("signal save: encode metrics: %w", err)
 	}
 	explanationJSON, err := encodeExplanation(sig.Explanation)
 	if err != nil {
@@ -71,11 +71,11 @@ func (r *SignalRepository) Save(ctx context.Context, sig domain.Signal) error {
 		return fmt.Errorf("signal save: clear evidence: %w", err)
 	}
 	for _, e := range sig.Evidence {
-		evMetrics, _ := json.Marshal(e.Metrics)
-		if evMetrics == nil {
-			evMetrics = []byte(`{}`)
+		evMetrics, err := encodeMetrics(e.Metrics)
+		if err != nil {
+			return fmt.Errorf("signal save: encode evidence metrics: %w", err)
 		}
-		_, err := tx.ExecContext(ctx, `
+		_, err = tx.ExecContext(ctx, `
 			INSERT INTO signal_evidence (signal_id, series_id, time, kind, score, metrics)
 			VALUES (?, ?, ?, ?, ?, ?)
 		`, sig.ID.String(), e.Series.String(), e.Time.UTC(), e.Kind, e.Score, string(evMetrics))
@@ -374,4 +374,23 @@ func decodeExplanation(raw string) (domain.Explanation, error) {
 		})
 	}
 	return out, nil
+}
+
+// encodeMetrics serialises a metric bag to its JSON column
+// representation.
+//
+// The error is returned, not discarded. encoding/json refuses
+// non-finite floats and yields zero bytes when it does, so a
+// discarded error wrote the whole map as an empty column and lost
+// every key in it, not just the unrepresentable one —
+// [domain.ErrNonFiniteMetric] describes the mechanism. Save already
+// validates the signal, which rejects non-finite metrics before they
+// reach here; this is the second line, for whatever becomes
+// unmarshalable next.
+func encodeMetrics(m map[string]float64) ([]byte, error) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }

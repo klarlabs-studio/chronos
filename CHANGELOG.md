@@ -4,6 +4,75 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [Unreleased]
+
+### Changed
+- **BREAKING: `Signal.Validate` rejects non-finite numbers anywhere in a
+  signal's numeric payload** — `Signal.Metrics`, `Evidence.Score`,
+  `Evidence.Metrics`, `Explanation.ThresholdUsed` and the feature-evolution
+  values — with a new `domain.ErrNonFiniteMetric`. `Strength` and
+  `Confidence` are covered too: their range check reads
+  `Strength < 0 || Strength > 1`, and both comparisons are false for `NaN`,
+  so the same hole 0.17.0 closed inside the detectors was still open at the
+  domain boundary the detectors hand to.
+
+  The loss this prevents is silent and total, not partial. All three SQL
+  stores wrote the metric bags with
+  `metricsJSON, _ := json.Marshal(sig.Metrics)`. `encoding/json` refuses
+  non-finite floats and returns zero bytes when it does — measured:
+  `json.Marshal(map[string]float64{"mean": math.Inf(1), "n": 12})` returns
+  `bytes=""`, `err="json: unsupported value: +Inf"` — so the discarded error
+  wrote an empty metrics column. One unrepresentable key did not cost that
+  key; it cost the map, and afterwards nothing could tell that signal apart
+  from one whose detector surfaced no metrics at all.
+
+  Reachable from legal input. Twelve observations of `math.MaxFloat64` are
+  a flat series, so Stall fired: the normalised spread was exactly 0, and
+  `metrics["mean"]` — the mean of the raw values — was `+Inf`. The signal
+  passed `Validate` and reached the stores with its metrics erased.
+  `TestFinding_NonFiniteMetricsSurviveIntoSignals` recorded that in 0.17.0
+  rather than fixing it, because the fix changes the `Signal` contract.
+  This is that change; the test is now
+  `TestStallIsSilentWhenItsMetricsOverflow` and asserts the silence.
+
+  Finite extremes stay valid — the invariant is representability, not
+  magnitude. Embedded callers constructing a `domain.Signal` by hand must
+  keep its numbers finite; out-of-tree detectors that previously emitted an
+  overflowed metric now have their signal dropped rather than persisted
+  empty.
+
+### Fixed
+- **Detectors stay silent instead of emitting a signal that fails its own
+  `Validate`.** The `Detector` interface has always said returned signals
+  must validate; the promise rested on each detector's arithmetic guards,
+  and a gap in one produced a signal rather than silence. All eleven
+  detectors now filter their output through one helper, and
+  `Engine.Detect` repeats the check before the pipeline persists and the
+  API serves, because `Detector` is an interface and an out-of-tree
+  implementation is under the same contract with nothing else checking it.
+  This follows the rule the rest of the engine already keeps: a detector
+  that cannot establish evidence produces no signal rather than
+  manufactured confidence, and "no signal" is a valid result.
+
+  Side effect worth knowing: descending input, which the `Detector`
+  interface documents as a precondition violation, now yields an empty
+  slice instead of signals with inverted windows.
+  `TestFinding_DetectorsRequireChronologicalInput` still records the
+  caveat — the loss remains silent — but records silence rather than
+  corruption.
+- **The three SQL stores no longer discard the `json.Marshal` error** when
+  encoding `Signal.Metrics` and `Evidence.Metrics`
+  (`internal/store/{sqlite,postgres,mysql}/signal_repo.go`; libSQL reuses
+  the SQLite repositories). Each now goes through an `encodeMetrics` helper
+  that returns the error, and `Save` fails loudly rather than writing an
+  empty column. The invariant above means nothing can currently reach that
+  path — `Save` validates first — which is exactly why the error needed
+  returning: the previous behaviour was invisible to every test, and the
+  next unmarshalable value to appear in a metric bag would have been
+  written as emptiness in the same way. MySQL also carried
+  `if metricsJSON == nil { metricsJSON = []byte("{}") }`, a guard that
+  could only fire when the discarded error was non-nil; it is gone.
+
 ## [0.17.0] - 2026-09-20
 
 ### Changed

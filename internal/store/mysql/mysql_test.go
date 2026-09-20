@@ -1,6 +1,7 @@
 package mysql
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -117,5 +118,49 @@ CREATE INDEX idx_foo ON foo(id);
 	}
 	if !strings.Contains(got[1], "CREATE INDEX idx_foo") {
 		t.Errorf("second statement: %q", got[1])
+	}
+}
+
+// TestEncodeMetrics_ReturnsTheMarshalError pins the error this
+// package used to discard.
+//
+// Save validates the signal first, and domain.Signal.Validate now
+// rejects non-finite metrics, so nothing reaches encodeMetrics that
+// can fail today. That is the reason to test the helper directly: the
+// discarded error was invisible precisely because no test could see
+// it, and the next unmarshalable value to appear in a metric bag must
+// not be written as an empty column the way +Inf was.
+func TestEncodeMetrics_ReturnsTheMarshalError(t *testing.T) {
+	b, err := encodeMetrics(map[string]float64{"mean": math.Inf(1), "n": 12})
+	if err == nil {
+		t.Fatalf("encodeMetrics(+Inf) = %q, nil — want the encoding/json rejection", b)
+	}
+	if b != nil {
+		t.Errorf("encodeMetrics returned %q alongside its error, want no bytes", b)
+	}
+}
+
+// TestEncodeMetrics_RoundTripsAFiniteBag checks the helper did not
+// change what a representable bag serialises to; the column contents
+// are a storage contract the read path parses back.
+func TestEncodeMetrics_RoundTripsAFiniteBag(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   map[string]float64
+		want string
+	}{
+		{"populated", map[string]float64{"slope": 1.25}, `{"slope":1.25}`},
+		{"empty", map[string]float64{}, `{}`},
+		{"nil", nil, `null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := encodeMetrics(tc.in)
+			if err != nil {
+				t.Fatalf("encodeMetrics() error = %v", err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("encodeMetrics() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
