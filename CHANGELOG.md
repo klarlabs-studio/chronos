@@ -4,6 +4,64 @@ All notable changes to Chronos are documented here. The format follows [Keep a C
 
 The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md) is the stability boundary. Renaming any documented Pattern, Evidence.Kind, or metric key is a major-version change.
 
+## [Unreleased]
+
+### Changed
+- **Spike and Drop derive Confidence from the quality of the evidence
+  instead of copying Strength.** This changes the confidence number
+  emitted for every spike and drop signal, so it wants a minor version
+  bump: consumers thresholding or ranking on these values will see
+  different results for identical input. `detector_version` moves to
+  `spike-v2` / `drop-v2` so a consumer can tell the two formulas apart.
+
+  The old behaviour was `Confidence = Strength`, which made the two
+  fields one measurement under two names. It contradicted itself at the
+  bottom of the range: at six observations — the fewest the detector
+  accepts, with the shipped window of 5 — a large jump reported
+  `Confidence = 1.0` beside `ConfidenceClass = "tentative"`. The signal
+  claimed maximum certainty and admitted to being tentative in the same
+  breath. Chronos's own rule is that strength describes the magnitude of
+  the observed pattern and confidence the quality of the evidence behind
+  it, and that the two stay distinct.
+
+  Confidence is now `support × quietness × margin`:
+  - **support** — `min(n / (CONFIDENCE_STRONG × (SpikeWindow+1)), 1)`.
+    It saturates exactly at the boundary where `ConfidenceClass` says
+    `strong`, which is what makes the number and the class agree: a
+    `tentative` signal is now capped at `ESTABLISHED/STRONG` (0.4 on the
+    shipped 2× / 5× defaults), and only a `strong` one can approach 1.
+  - **quietness** — `1 − ½·stddev/(|mean| + stddev)`. The same z against
+    a baseline whose spread rivals its own level is weaker evidence than
+    one against a quiet baseline. Capped at a halving: noise weakens
+    evidence, it does not erase it.
+  - **margin** — `½` at the trigger threshold, reaching `1` once `|z|`
+    is 25% past it. A detection sitting on the decision boundary is one
+    a fractionally different baseline would not have made. Past that
+    point confidence is flat in magnitude, which is what keeps it
+    distinct from strength.
+
+  Concrete values, shipped defaults (window 5, z ≥ 2.5, established 2×,
+  strong 5×). Six observations `[1, 1.1, 0.9, 1, 1.05, 900]`, z ≈ 13553:
+  strength stays `1.0`, confidence `1.0 → 0.1938`, class `tentative` as
+  before. The same jump after 30 observations of that baseline:
+  confidence `1.0 → 0.9692`, class `strong`. Holding history and
+  baseline fixed and varying only the deviation, z = 3.125, 4, 5 and 40
+  all yield confidence `0.1993` while strength runs 0.625 → 1.0 — the
+  flatness is the point.
+
+  Strength is unchanged, and sample count is deliberately not folded
+  into it. Consumers ranking spikes by *how big* they were should read
+  `strength` or the `z` metric; `confidence` now answers how much the
+  evidence is worth.
+
+### Fixed
+- **A non-real spike/drop confidence can no longer reach the wire.**
+  `domain.Signal.Validate` range-checks with `< 0 || > 1` and both
+  comparisons are false for `NaN`, so a `NaN` confidence validates
+  cleanly — the failure mode 0.17.0 fixed in the detectors' arithmetic.
+  The new confidence passes through an explicit finiteness guard rather
+  than `clamp01`, which returns `NaN` unchanged.
+
 ## [0.17.0] - 2026-09-20
 
 ### Changed
