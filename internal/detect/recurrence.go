@@ -43,7 +43,8 @@ func (r *Recurrence) Detect(_ context.Context, scopeID uuid.UUID, states []chron
 	subjects := mostRecentByEntity(states)
 
 	var signals []domain.Signal
-	for entityID, subject := range subjects {
+	for _, entityID := range sortedUUIDKeys(subjects) {
+		subject := subjects[entityID]
 		evidence := r.gatherEvidence(entityID, subject, states)
 		if len(evidence) == 0 || len(evidence) < r.cfg.MinSampleSize {
 			continue

@@ -51,7 +51,9 @@ func (c *ChangePoint) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 	}
 	const minSide = 2
 	var signals []domain.Signal
-	for series, observations := range bySeries(states) {
+	ids, grouped := seriesInOrder(states)
+	for _, series := range ids {
+		observations := grouped[series]
 		if len(observations) < c.cfg.ChangePointMinPoints {
 			continue
 		}

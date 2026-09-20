@@ -64,7 +64,9 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 		return nil
 	}
 	var signals []domain.Signal
-	for series, observations := range bySeries(states) {
+	ids, grouped := seriesInOrder(states)
+	for _, series := range ids {
+		observations := grouped[series]
 		if len(observations) < window+1 {
 			continue
 		}
@@ -73,10 +75,16 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 		baseline := outcomes(baselineStates)
 		m := mean(baseline)
 		sd := stddev(baseline, m)
-		if sd == 0 {
+		// A baseline whose sum overflowed to ±Inf has an infinite
+		// mean and a NaN spread: there is no scale to measure the
+		// latest point against, so there is no deviation to report.
+		if sd == 0 || !isFinite(sd) || !isFinite(m) {
 			continue
 		}
 		z := (last.Outcome() - m) / sd
+		if !isFinite(z) {
+			continue
+		}
 		if z*float64(direction) < threshold {
 			continue
 		}
