@@ -181,7 +181,7 @@ type retainingRepo struct {
 	called  bool
 }
 
-func (r *retainingRepo) DeleteSignalsOlderThan(_ context.Context, cutoff time.Time) (int64, error) {
+func (r *retainingRepo) DeleteSignalsOlderThan(_ context.Context, cutoff time.Time, _ int) (int64, error) {
 	r.called = true
 	r.cutoff = cutoff
 	return r.deleted, nil
@@ -202,7 +202,7 @@ func TestNotifyingSignalRepository_ForwardsRetention(t *testing.T) {
 	}
 
 	cutoff := time.Now().Add(-24 * time.Hour)
-	n, err := repo.DeleteSignalsOlderThan(context.Background(), cutoff)
+	n, err := repo.DeleteSignalsOlderThan(context.Background(), cutoff, 0)
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestNotifyingSignalRepository_ForwardsRetention(t *testing.T) {
 func TestNotifyingSignalRepository_RetentionUnsupportedByInner(t *testing.T) {
 	repo := WrapSignals(&fakeRepo{}, &recordingNotifier{})
 
-	_, err := repo.DeleteSignalsOlderThan(context.Background(), time.Now())
+	_, err := repo.DeleteSignalsOlderThan(context.Background(), time.Now(), 0)
 	if !errors.Is(err, ports.ErrNotImplemented) {
 		t.Fatalf("err = %v, want ports.ErrNotImplemented", err)
 	}

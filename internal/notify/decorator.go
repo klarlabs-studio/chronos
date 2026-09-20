@@ -84,12 +84,12 @@ func (n *NotifyingSignalRepository) Count(ctx context.Context, filter ports.Sign
 // to forward is a capability the scheduler cannot see — retention would
 // silently do nothing on exactly the deployments whose store has grown
 // large enough to need it.
-func (n *NotifyingSignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+func (n *NotifyingSignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
 	retainer, ok := n.inner.(ports.SignalRetainer)
 	if !ok {
 		return 0, ports.ErrNotImplemented
 	}
-	return retainer.DeleteSignalsOlderThan(ctx, cutoff)
+	return retainer.DeleteSignalsOlderThan(ctx, cutoff, limit)
 }
 
 // Multi composes several Notifiers into one. Failures in any single

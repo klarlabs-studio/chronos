@@ -234,7 +234,22 @@ type SignalRepository interface {
 // Deleting a signal deletes its evidence with it; the SQL backends rely
 // on ON DELETE CASCADE for that.
 type SignalRetainer interface {
-	// DeleteSignalsOlderThan removes every signal detected strictly
-	// before cutoff, across all scopes, and reports how many rows went.
-	DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error)
+	// DeleteSignalsOlderThan removes at most limit signals detected
+	// strictly before cutoff, across all scopes, and reports how many
+	// rows went. A limit of zero or less means unbounded.
+	//
+	// The limit exists because the unbounded form is unusable on the
+	// deployments that most need retention. A store that has been
+	// accumulating before retention was switched on presents its entire
+	// backlog to the first sweep, and evidence cascades: one real
+	// deployment held 36,209 signals and 25,940,060 evidence rows, about
+	// 716 per signal. Deleting that in a single statement ran for nine
+	// minutes consuming ~64MB/min of WAL with nothing reclaimable until
+	// commit, and would have exhausted the volume and rolled back,
+	// achieving nothing. The same deletion in batches of 1000 moved free
+	// space not at all, because WAL recycles between commits.
+	//
+	// Callers should pass a positive limit and loop until a sweep
+	// returns fewer rows than it asked for.
+	DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time, limit int) (int64, error)
 }

@@ -141,9 +141,20 @@ func (r *SignalRepository) Count(ctx context.Context, filter ports.SignalFilter)
 
 // DeleteSignalsOlderThan removes signals detected before cutoff.
 // signal_evidence goes with them via ON DELETE CASCADE.
-func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := r.conn.DB.ExecContext(ctx,
-		`DELETE FROM signals WHERE detected_at < ?`, formatTime(cutoff))
+func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
+	query := `DELETE FROM signals WHERE detected_at < ?`
+	args := []any{formatTime(cutoff)}
+	if limit > 0 {
+		// sqlite is not compiled with SQLITE_ENABLE_UPDATE_DELETE_LIMIT
+		// in general, so bound it through a subquery rather than
+		// DELETE ... LIMIT, which would fail to parse on a stock build.
+		query = `DELETE FROM signals WHERE id IN (
+			SELECT id FROM signals WHERE detected_at < ?
+			ORDER BY detected_at LIMIT ?
+		)`
+		args = append(args, limit)
+	}
+	res, err := r.conn.DB.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("signal retention: %w", err)
 	}

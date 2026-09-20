@@ -377,3 +377,73 @@ func TestScheduler_ZeroLookbackFallsBackToDefault(t *testing.T) {
 		t.Error("zero lookback produced a zero cutoff, which loads the entire table")
 	}
 }
+
+// batchRecorder is a SignalRepository whose retention records the limit
+// it was asked for and drains a finite backlog.
+type batchRecorder struct {
+	ports.SignalRepository
+	remaining int64
+	limits    []int
+}
+
+func (b *batchRecorder) DeleteSignalsOlderThan(_ context.Context, _ time.Time, limit int) (int64, error) {
+	b.limits = append(b.limits, limit)
+	n := int64(limit)
+	if limit <= 0 || n > b.remaining {
+		n = b.remaining
+	}
+	b.remaining -= n
+	return n, nil
+}
+
+// The sweep must bound every DELETE and loop until the backlog is gone.
+//
+// Unbounded is unusable on exactly the deployments that reach for
+// retention: a store that accumulated first hands its whole backlog to
+// the first sweep, and evidence cascades per signal. One real deployment
+// held 26,807 eligible signals carrying ~19M evidence rows; as a single
+// statement it ran nine minutes at ~64MB/min of WAL and was minutes from
+// exhausting the volume, at which point it would have rolled back having
+// deleted nothing.
+func TestScheduler_SweepDeletesInBoundedBatches(t *testing.T) {
+	mem := memory.New()
+	rec := &batchRecorder{SignalRepository: mem.Signals, remaining: 2500}
+
+	s := NewScheduler(mem.EntityStates, rec, detect.NewEngine(config.Default()), time.Second, nil).
+		WithRetention(24 * time.Hour)
+	s.sweep(context.Background())
+
+	if len(rec.limits) == 0 {
+		t.Fatal("sweep issued no delete at all")
+	}
+	for i, l := range rec.limits {
+		if l <= 0 {
+			t.Fatalf("call %d asked for an unbounded delete (limit=%d); a backlog of any size lands in one transaction", i, l)
+		}
+	}
+	// 2500 against a 1000 batch is three calls: 1000, 1000, 500.
+	if len(rec.limits) < 3 {
+		t.Errorf("sweep made %d call(s) for a 2500-row backlog; it stopped before draining it", len(rec.limits))
+	}
+	if rec.remaining != 0 {
+		t.Errorf("backlog not drained: %d rows left", rec.remaining)
+	}
+}
+
+// A sweep that is cancelled mid-backlog stops at a batch boundary rather
+// than continuing to issue deletes against a dead context.
+func TestScheduler_SweepStopsOnCancel(t *testing.T) {
+	mem := memory.New()
+	rec := &batchRecorder{SignalRepository: mem.Signals, remaining: 1 << 20}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s := NewScheduler(mem.EntityStates, rec, detect.NewEngine(config.Default()), time.Second, nil).
+		WithRetention(24 * time.Hour)
+	s.sweep(ctx)
+
+	if len(rec.limits) > 2 {
+		t.Errorf("sweep issued %d batches against a cancelled context; it should stop at the first boundary", len(rec.limits))
+	}
+}

@@ -132,9 +132,14 @@ func (r *SignalRepository) Count(ctx context.Context, filter ports.SignalFilter)
 
 // DeleteSignalsOlderThan removes signals detected before cutoff.
 // signal_evidence goes with them via ON DELETE CASCADE.
-func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
-	res, err := r.conn.DB.ExecContext(ctx,
-		`DELETE FROM signals WHERE detected_at < ?`, cutoff.UTC())
+func (r *SignalRepository) DeleteSignalsOlderThan(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
+	query := `DELETE FROM signals WHERE detected_at < ?`
+	args := []any{cutoff.UTC()}
+	if limit > 0 {
+		query += ` ORDER BY detected_at LIMIT ?`
+		args = append(args, limit)
+	}
+	res, err := r.conn.DB.ExecContext(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("signal retention: %w", err)
 	}
