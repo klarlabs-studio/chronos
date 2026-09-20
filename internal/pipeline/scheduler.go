@@ -69,15 +69,6 @@ func (s *Scheduler) WithRetention(d time.Duration) *Scheduler {
 	return s
 }
 
-// WithLookback bounds how much history each tick loads per scope, and
-// returns the scheduler for chaining. Zero or negative falls back to
-// defaultLookback rather than meaning "no bound": a zero cutoff is
-// time.Time{}, which as a query predicate matches every row ever
-// written and is precisely the unbounded read this exists to prevent.
-//
-// A setter for the same reason as WithRetention -- the constructor
-// already takes a time.Duration, and three adjacent durations are three
-// arguments a caller can transpose without the compiler noticing.
 // WithSweepInterval sets how often retention runs, and returns the
 // scheduler for chaining. Zero or negative falls back to the package
 // default.
@@ -91,6 +82,15 @@ func (s *Scheduler) WithSweepInterval(d time.Duration) *Scheduler {
 	return s
 }
 
+// WithLookback bounds how much history each tick loads per scope, and
+// returns the scheduler for chaining. Zero or negative falls back to
+// defaultLookback rather than meaning "no bound": a zero cutoff is
+// time.Time{}, which as a query predicate matches every row ever
+// written and is precisely the unbounded read this exists to prevent.
+//
+// A setter for the same reason as WithRetention -- the constructor
+// already takes a time.Duration, and three adjacent durations are three
+// arguments a caller can transpose without the compiler noticing.
 func (s *Scheduler) WithLookback(d time.Duration) *Scheduler {
 	s.lookback = d
 	return s
