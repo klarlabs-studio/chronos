@@ -316,3 +316,52 @@ func TestSQLite_SignalGetMissing(t *testing.T) {
 		t.Errorf("Get missing = %v, want ErrSignalNotFound", err)
 	}
 }
+
+// A bounded retention delete must remove only `limit` rows, oldest
+// first, and leave the rest for the next batch.
+//
+// sqlite needs a subquery for this: stock builds are not compiled with
+// SQLITE_ENABLE_UPDATE_DELETE_LIMIT, so `DELETE ... LIMIT` does not
+// parse. A backend that silently ignored the limit would delete the
+// whole backlog in one transaction, which is the failure this bound
+// exists to prevent.
+func TestSQLite_DeleteSignalsOlderThanHonoursLimit(t *testing.T) {
+	c := openTestConn(t)
+	ctx := context.Background()
+	scope := uuid.New()
+	base := time.Now().UTC().Add(-72 * time.Hour)
+
+	for i := 0; i < 5; i++ {
+		sig := mkSignal(scope, uuid.New(), domain.PatternTypeRecurrence, 0.9,
+			base.Add(time.Duration(i)*time.Minute))
+		if err := c.Signals.Save(ctx, sig); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	cutoff := time.Now().UTC()
+	n, err := c.Signals.DeleteSignalsOlderThan(ctx, cutoff, 2)
+	if err != nil {
+		t.Fatalf("bounded delete: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("deleted %d rows, want 2 — the limit was not honoured", n)
+	}
+
+	left, err := c.Signals.List(ctx, ports.SignalFilter{ScopeID: scope})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(left) != 3 {
+		t.Fatalf("%d signals remain, want 3", len(left))
+	}
+
+	// A limit of zero means unbounded, which must still work.
+	n, err = c.Signals.DeleteSignalsOlderThan(ctx, cutoff, 0)
+	if err != nil {
+		t.Fatalf("unbounded delete: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("unbounded delete removed %d, want 3", n)
+	}
+}

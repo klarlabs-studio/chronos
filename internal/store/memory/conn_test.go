@@ -166,3 +166,50 @@ func TestSignalRepository_GetMissing(t *testing.T) {
 		t.Errorf("Get missing = %v, want ErrSignalNotFound", err)
 	}
 }
+
+// A bounded retention delete removes the OLDEST rows first.
+//
+// Order matters, not just count. A bounded sweep that deleted an
+// arbitrary subset would leave the oldest rows behind on every pass and
+// never drain them, so retention would appear to run forever while the
+// rows it exists to remove stayed put.
+func TestMemory_DeleteSignalsOlderThanHonoursLimitOldestFirst(t *testing.T) {
+	c := New()
+	ctx := context.Background()
+	scope := uuid.New()
+	base := time.Now().UTC().Add(-72 * time.Hour)
+
+	// Saved newest-first so a correct implementation cannot pass by
+	// accident of insertion order.
+	var want []time.Time
+	for i := 4; i >= 0; i-- {
+		at := base.Add(time.Duration(i) * time.Minute)
+		if i >= 2 {
+			want = append(want, at)
+		}
+		if err := c.Signals.Save(ctx, mkSignal(scope, uuid.New(), domain.PatternTypeRecurrence, 0.9, at)); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	n, err := c.Signals.DeleteSignalsOlderThan(ctx, time.Now().UTC(), 2)
+	if err != nil {
+		t.Fatalf("bounded delete: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("deleted %d, want 2 — limit not honoured", n)
+	}
+
+	left, err := c.Signals.List(ctx, ports.SignalFilter{ScopeID: scope})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(left) != 3 {
+		t.Fatalf("%d remain, want 3", len(left))
+	}
+	for _, sig := range left {
+		if sig.DetectedAt.Equal(base) || sig.DetectedAt.Equal(base.Add(time.Minute)) {
+			t.Errorf("oldest signal at %v survived; the sweep deleted a newer subset and will never drain the backlog", sig.DetectedAt)
+		}
+	}
+}
