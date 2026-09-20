@@ -23,6 +23,8 @@ package chronos
 import (
 	"context"
 	"errors"
+	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +37,41 @@ var (
 	ErrMissingScopeID  = errors.New("chronos: entity state missing scope ID")
 	ErrMissingFeatures = errors.New("chronos: entity state has no features")
 	ErrLabelsMismatch  = errors.New("chronos: labels length does not match features length")
+
+	// ErrNonFiniteFeature rejects NaN, +Inf and -Inf at the boundary.
+	//
+	// Every detector computes means, variances, slopes or correlations over
+	// Features. A single NaN propagates silently through all of them: it is
+	// not equal to itself, it poisons any sum it touches, and comparisons
+	// against it are false, so threshold checks quietly fail open. The
+	// result is not an error but something worse -- a signal with a
+	// plausible shape and meaningless numbers.
+	//
+	// Three detectors previously guarded their own computed outputs against
+	// this. That is the wrong place and the wrong time: it catches the
+	// damage after the arithmetic, only in the detectors that remembered to
+	// look, and says nothing about the ones that did not.
+	ErrNonFiniteFeature = errors.New("chronos: entity state has a non-finite feature value (NaN or Inf)")
+
+	// ErrMissingTimestamp rejects the zero time.
+	//
+	// Ordering, windowing and lookback are all computed from Timestamp. The
+	// zero value is year 1, so an observation carrying it sorts before all
+	// real data and falls outside every lookback window -- it does not
+	// error, it silently never participates.
+	//
+	// This is an EntityState invariant, not a wire requirement: the HTTP,
+	// gRPC and MCP layers still accept an omitted timestamp and default it
+	// to now before an EntityState is constructed.
+	ErrMissingTimestamp = errors.New("chronos: entity state missing timestamp")
+
+	// ErrEmptyLabel rejects a blank feature name in a non-empty Labels slice.
+	//
+	// Labels name the features that evidence refers to in emitted signals. A
+	// blank one produces evidence a consumer cannot attribute to a feature,
+	// which defeats the point of carrying labels. Labels stay optional;
+	// supplying them and leaving one blank does not.
+	ErrEmptyLabel = errors.New("chronos: entity state has an empty feature label")
 )
 
 // EntityState is a single observation of an entity at a point in time, encoded
@@ -73,6 +110,28 @@ func (s EntityState) Validate() error {
 	}
 	if len(s.Labels) > 0 && len(s.Labels) != len(s.Features) {
 		return ErrLabelsMismatch
+	}
+	// Checked after shape, before content: identity and arity problems are
+	// structural and more useful to report first, and an observation whose
+	// feature vector is malformed is not improved by learning its timestamp
+	// is also absent.
+	if s.Timestamp.IsZero() {
+		return ErrMissingTimestamp
+	}
+	// Checked here, once, rather than in each detector. This is the
+	// boundary the detectors are entitled to trust: past this point a
+	// detector may assume every element of Features is a finite float64
+	// and reason about sample counts and variance instead of re-deriving
+	// whether arithmetic is safe at all.
+	for _, f := range s.Features {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return ErrNonFiniteFeature
+		}
+	}
+	for _, l := range s.Labels {
+		if strings.TrimSpace(l) == "" {
+			return ErrEmptyLabel
+		}
 	}
 	return nil
 }

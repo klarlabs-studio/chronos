@@ -25,6 +25,11 @@ func TestEntityState_Validate(t *testing.T) {
 				EntityID: entityID,
 				ScopeID:  scopeID,
 				Features: []float64{1, 2, 3},
+				// Timestamp became an invariant rather than an optional
+				// field. The wire still defaults an omitted timestamp to
+				// now (internal/api/dto.go), so the tightening applies at
+				// the EntityState boundary only.
+				Timestamp: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
 			},
 		},
 		{
