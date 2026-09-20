@@ -6,6 +6,8 @@ This document describes the engine's layout, the contracts at each boundary, and
 
 Chronos is the **Time / Pattern Perception** layer of the cognitive stack. It accepts time-series observations from any domain via an adapter, runs them through a fan-out of detectors, and emits structured signals.
 
+The full Intent — principles, detector acceptance criteria, hardening priorities, and non-goals — lives in [`intent.md`](intent.md). Temporal ordering and duplicate semantics are in [`temporal-contract.md`](temporal-contract.md).
+
 Two design rules everything else follows:
 
 1. **Signals, not opinions.** Chronos perceives; agent runtimes and other downstream consumers interpret. There is no Title/Summary/Suggestion, no dismissal, no feedback. Domain types carry only structured perception.
@@ -117,7 +119,7 @@ The Engine groups input states by scope, sorts each group ascending by timestamp
 
 ### Other available detectors
 
-- `Trend` — OLS linear regression on outcome vs ordinal index. Trigger: `|slope| > TrendMinSlope ∧ R² > 0.3 ∧ n >= TrendMinPoints`. Strength = R²; metrics carry slope, intercept, R², n. Evidence kind `regression_summary`.
+- `Trend` — OLS linear regression on outcome vs wall-clock hours since window start (`trend-v2`). Trigger: `|slope| > TrendMinSlope ∧ R² > 0.3 ∧ n >= TrendMinPoints`. Strength = R²; metrics carry slope (outcome units / hour), intercept, R², n. Evidence kind `regression_summary`.
 - `Spike` / `Drop` — z-score of the most recent outcome against the previous `SpikeWindow` points. Trigger: `|z| >= threshold` in the configured direction. Strength = `min(|z|/5, 1)`. Confidence is derived from the evidence rather than the magnitude: `support × quietness × margin`, where support is `min(n / (CONFIDENCE_STRONG × (SpikeWindow+1)), 1)`, quietness is `1 − ½·stddev/(|mean| + stddev)`, and margin ramps from `½` at the trigger threshold to `1` once `|z|` is 25% past it. Support saturates exactly where `ConfidenceClass` says `strong`, so the number and the class cannot contradict each other. Metrics carry z, baseline mean/stddev. Evidence kind `baseline_deviation`.
 - `Stall` — normalised stddev of outcomes below `StallMaxStdDev` over at least `StallMinPoints`. Strength reflects flatness (1 - normalised_stddev / threshold). Evidence kind `variance_window`.
 - `Anomaly` — the cross-entity dual of Recurrence. For each entity's most recent state, cosine-compare to peers' most recent states; emit when the *highest* peer similarity is below `AnomalyMaxSimilarity` (subject is isolated). Strength = `1 - max_similarity`. Evidence kind `peer_distance`, one per peer. Window is degenerate: `Start == End == subject.Timestamp`, since Anomaly is a snapshot in time across peers rather than an interval. Consumers computing window duration must special-case this pattern.

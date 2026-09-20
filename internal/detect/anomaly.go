@@ -68,12 +68,21 @@ func (a *Anomaly) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.
 }
 
 func (a *Anomaly) peerEvidence(subjectID uuid.UUID, subject chronos.EntityState, latest map[uuid.UUID]chronos.EntityState) []domain.Evidence {
+	// A zero-norm feature vector has no direction. Cosine reports 0 for
+	// it, which would read as "maximally isolated" if we treated that as
+	// a real distance. Skip the subject entirely — no comparable state.
+	if featureNormSq(subject.Features) == 0 {
+		return nil
+	}
 	var ev []domain.Evidence
 	for _, peerID := range sortedUUIDKeys(latest) {
 		if peerID == subjectID {
 			continue
 		}
 		peer := latest[peerID]
+		if len(peer.Features) != len(subject.Features) || featureNormSq(peer.Features) == 0 {
+			continue
+		}
 		ev = append(ev, domain.Evidence{
 			Series: peerID,
 			Time:   peer.Timestamp,

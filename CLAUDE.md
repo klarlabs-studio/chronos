@@ -28,7 +28,7 @@ Two non-negotiable rules:
 1. **Signals, not opinions.** Chronos perceives; agent runtimes interpret. No Title/Summary/Suggestion in domain or wire types. No dismissal, no feedback, no IsActive. Those are agent-runtime and Mnemos concerns.
 2. **The core engine knows nothing about the domain.** Domain knowledge enters only through adapters that produce `chronos.EntityState`. If domain-specific code starts leaking into `internal/` or the top-level `chronos` package, that is a design break.
 
-See [`docs/cognitive-stack.md`](docs/cognitive-stack.md) for how the systems compose.
+See [`docs/intent.md`](docs/intent.md) for the full Intent (principles, detector acceptance criteria, hardening priorities). Temporal semantics: [`docs/temporal-contract.md`](docs/temporal-contract.md). Cognitive-stack composition: [`docs/cognitive-stack.md`](docs/cognitive-stack.md).
 
 ## Architecture
 
@@ -91,7 +91,7 @@ All env-var driven. Defaults in `config.Default()` (`internal/config/config.go`)
 | `CHRONOS_JOB_TIMEOUT` | `10m` | Compute timeout |
 | `CHRONOS_SIM_THRESHOLD` | `0.85` | Recurrence: min cosine similarity |
 | `CHRONOS_MIN_SAMPLE` | `2` | Recurrence: min peer cases |
-| `CHRONOS_TREND_MIN_SLOPE` | `0.05` | Trend: minimum |slope| (Tier B) |
+| `CHRONOS_TREND_MIN_SLOPE` | `0.05` | Trend: minimum \|slope\| in outcome units per hour |
 | `CHRONOS_TREND_MIN_POINTS` | `4` | Trend: min observations (Tier B) |
 | `CHRONOS_SPIKE_Z` | `2.5` | Spike: |z-score| threshold (Tier B) |
 | `CHRONOS_DROP_Z` | `2.5` | Drop: |z-score| threshold (Tier B) |

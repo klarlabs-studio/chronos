@@ -23,9 +23,9 @@ import (
 // detector either stays silent or emits a signal whose Strength and
 // Confidence are real numbers in [0, 1] and which satisfies
 // domain.Signal.Validate — the guarantee the Detector interface makes
-// to the engine. Tests named TestFinding_* document behaviour that is
-// currently questionable rather than asserting it is correct; each
-// says why in its comment.
+// to the engine. Remaining TestFinding_* cases document deliberate
+// product choices (ordinal Trend, ChangePointMinDelta default 0,
+// detector precondition on chronological input) rather than bugs.
 //
 // Inputs are assumed finite: NaN/Inf rejection at the EntityState
 // boundary is covered separately. Every fixture carries a non-zero
@@ -288,16 +288,18 @@ func TestTrend_Adversarial(t *testing.T) {
 		{"negative huge magnitudes", advConst(-advHuge, 12), 0,
 			"same overflow in the negative direction"},
 		{"denormal ramp", []float64{advDenormal, 2 * advDenormal, 3 * advDenormal, 4 * advDenormal, 5 * advDenormal, 6 * advDenormal}, 0,
-			"a perfect line whose slope is 5e-324, far below TrendMinSlope 0.05"},
+			"a perfect line whose wall-clock slope is far below TrendMinSlope 0.05"},
 		{"slope exactly at threshold", advRamp(8, 0, 0.05), 1,
-			"|slope| == TrendMinSlope is not below it, so it emits"},
+			"|slope| == TrendMinSlope (outcome units per hour) is not below it, so it emits"},
 		{"slope just under threshold", advRamp(8, 0, 0.049), 0,
 			"|slope| below TrendMinSlope stays silent"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			d := NewTrend(advCfg())
-			got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, tc.ys))
+			// Hourly spacing so wall-clock slope (per hour) matches the
+			// per-step dy in advRamp for threshold cases.
+			got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Hour, tc.ys))
 			if len(got) != tc.want {
 				t.Fatalf("got %d signals, want %d (%s)", len(got), tc.want, tc.why)
 			}
@@ -465,13 +467,13 @@ func TestChangePoint_Adversarial(t *testing.T) {
 		{"exactly at minimum, clean step", []float64{1, 1.01, 0.99, 1, 9, 9.01, 8.99, 9}, 1,
 			"eight points is the documented floor"},
 		{"perfect step, zero variance either side", []float64{1, 1, 1, 1, 9, 9, 9, 9}, 1,
-			"a signal is emitted, but not at the true split; see TestFinding_ChangePointPrefersNoisyStepsOverCleanOnes"},
+			"clean constant regimes produce an Inf shift ranked as maximum evidence"},
 		{"huge constant", advConst(advHuge, 12), 0,
 			"no shift is computable when every regime statistic overflows"},
 		{"huge step", append(advConst(1, 6), advConst(advHuge, 6)...), 0,
 			"every candidate split puts MaxFloat64 values on one side, whose mean and spread overflow; no split yields a real shift"},
-		{"denormal step", append(advConst(advDenormal, 6), advConst(2*advDenormal, 6)...), 0,
-			"subnormal squared deviations underflow to zero, so every split has zero pooled spread and an infinite shift"},
+		{"denormal step", append(advConst(advDenormal, 6), advConst(2*advDenormal, 6)...), 1,
+			"subnormal constant regimes still form a clean step; Inf shift is accepted as maximum evidence"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -660,8 +662,8 @@ func TestAnomaly_Adversarial(t *testing.T) {
 	}{
 		{"identical vectors", [][]float64{{1, 1, 1}, {1, 1, 1}, {1, 1, 1}}, 0,
 			"every peer is at similarity 1, far above AnomalyMaxSimilarity 0.5"},
-		{"all-zero vectors", [][]float64{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, 3,
-			"cosine reports 0 for a directionless vector, which reads as total isolation; see TestFinding_AnomalyCallsZeroVectorsIsolated"},
+		{"all-zero vectors", [][]float64{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, 0,
+			"zero-norm vectors have no direction; Anomaly skips them rather than reading Cosine 0 as isolation"},
 		{"huge vectors", [][]float64{{advHuge, advHuge, advHuge}, {advHuge, advHuge, advHuge}, {advHuge, advHuge, advHuge}}, 3,
 			"overflow makes cosine undefined, which is also reported as 0 similarity"},
 		{"orthogonal vectors", [][]float64{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, 3,
@@ -798,130 +800,64 @@ func TestCrossScopeCorrelation_OutOfOrderInputIsSortedInternally(t *testing.T) {
 	advAssertSane(t, got)
 }
 
-// --- Findings --------------------------------------------------------------
+// --- Resolved findings -----------------------------------------------------
 //
-// The tests below document behaviour that is questionable but was
-// left in place because changing it would change what the detectors
-// mean, not just how they compute. They assert the behaviour that
-// exists today so a future change to it is visible.
+// Tests below used to pin incorrect behaviour under TestFinding_*.
+// Each asserts the corrected contract so a regression is visible.
 
-// TestFinding_TwoPointCorrelationIsAlwaysPerfect records that
-// Correlation accepts CorrelationMinPoints as low as 2, and any two
-// points are exactly collinear, so r is always +/-1. The shipped
-// default is 5, so this is reachable only by configuration, but the
-// detector does not refuse it.
-func TestFinding_TwoPointCorrelationIsAlwaysPerfect(t *testing.T) {
+// TestCorrelationRefusesTwoPointCollinearity records that a
+// CorrelationMinPoints floor below 3 is rejected by config.Validate —
+// two points are always collinear, so |r| = 1 would be manufactured.
+func TestCorrelationRefusesTwoPointCollinearity(t *testing.T) {
 	cfg := advCfg()
 	cfg.CorrelationMinPoints = 2
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate to reject CorrelationMinPoints=2")
+	}
+	// Detector defence in depth: even a bypassed Validate must not emit.
 	scope := uuid.New()
-	// Two series with nothing in common but their length.
 	states := append(advSeries(scope, uuid.New(), time.Minute, []float64{1, 2}),
 		advSeries(scope, uuid.New(), time.Minute, []float64{3, 91})...)
 	got := NewCorrelation(cfg).Detect(context.Background(), scope, states)
-	if len(got) != 1 {
-		t.Fatalf("got %d signals, want 1", len(got))
-	}
-	if got[0].Metrics["r"] != 1 {
-		t.Errorf("r = %v, want exactly 1 — two points are always collinear", got[0].Metrics["r"])
-	}
-	if got[0].Strength != 1 {
-		t.Errorf("Strength = %v, want 1", got[0].Strength)
+	if len(got) != 0 {
+		t.Fatalf("got %d signals with MinPoints=2, want 0", len(got))
 	}
 }
 
-// TestFinding_OutlierClusterSaturatesOnDenormalDeviation records that
-// a change of one subnormal ulp off a zero baseline is scored as
-// peak_z = 100 and forms a full cohort signal.
-//
-// The detector deliberately substitutes a saturated z when the
-// baseline has zero variance (see the default branch in Detect),
-// because a constant baseline plus any different value is "the
-// strongest possible outlier" in relative terms. With no absolute
-// floor, 5e-324 qualifies. Three such series produce a cluster with
-// confidence 0.3 built entirely out of the smallest representable
-// numbers.
-func TestFinding_OutlierClusterSaturatesOnDenormalDeviation(t *testing.T) {
+// TestOutlierClusterIgnoresDenormalDeviation records that a one-ulp
+// subnormal move off a zero baseline does not form a cohort signal.
+func TestOutlierClusterIgnoresDenormalDeviation(t *testing.T) {
 	scope := uuid.New()
 	d := NewOutlierCluster(advCfg())
 	ys := []float64{0, 0, 0, 0, 0, advDenormal, 0, 0}
 	got := d.Detect(context.Background(), scope, advCohort(scope, 3, time.Minute, ys))
+	if len(got) != 0 {
+		t.Fatalf("got %d signals, want 0 — denormal noise is not a cluster", len(got))
+	}
+}
+
+// TestOutlierClusterConfidenceTracksSupport records that confidence
+// is strength × sampleFactor, not strength+0.3.
+func TestOutlierClusterConfidenceTracksSupport(t *testing.T) {
+	scope := uuid.New()
+	d := NewOutlierCluster(advCfg())
+	ys := []float64{1, 1, 1, 1, 1, 10, 1, 1}
+	got := d.Detect(context.Background(), scope, advCohort(scope, 3, time.Minute, ys))
 	if len(got) != 1 {
-		t.Fatalf("got %d signals, want 1 (the finding is that this fires at all)", len(got))
+		t.Fatalf("got %d signals, want 1", len(got))
 	}
 	s := got[0]
-	if s.Evidence[0].Metrics["peak_z"] != 100 {
-		t.Errorf("peak_z = %v, want the saturated 100", s.Evidence[0].Metrics["peak_z"])
-	}
-	if s.Confidence != 0.3 {
-		t.Errorf("Confidence = %v, want 0.3 — the floor the detector adds to a bare-minimum cluster", s.Confidence)
-	}
-	if s.Metrics["member_count"] != 3 {
-		t.Errorf("member_count = %v, want 3", s.Metrics["member_count"])
+	wantConf := clamp01(s.Strength * sampleFactor(3, 2*advCfg().OutlierClusterMinSeries))
+	if s.Confidence != wantConf {
+		t.Errorf("Confidence = %v, want %v (strength × sampleFactor)", s.Confidence, wantConf)
 	}
 	advAssertSane(t, got)
 }
 
-// TestFinding_ChangePointAndStallDisagreeOnTheSameSeries records that
-// one eight-point series can be called both flat and regime-shifted.
-//
-// ChangePoint standardises the mean shift by the series' own
-// variability, so a metric that moves in its fourth decimal place
-// divides a third-decimal change out to hundreds of sigma.
-// ChangePointMinDelta exists to require a minimum absolute movement
-// but ships as 0, leaving the guard off by default. The result is a
-// change_point at strength 1.0 and a stall at strength 0.90 over
-// exactly the same observations.
-func TestFinding_ChangePointAndStallDisagreeOnTheSameSeries(t *testing.T) {
-	scope := uuid.New()
-	entity := uuid.New()
-	ys := []float64{1.0000, 1.0001, 1.0000, 1.0001, 1.0100, 1.0101, 1.0100, 1.0101}
-	states := advSeries(scope, entity, time.Minute, ys)
-
-	cp := NewChangePoint(advCfg()).Detect(context.Background(), scope, states)
-	st := NewStall(advCfg()).Detect(context.Background(), scope, states)
-	if len(cp) != 1 || len(st) != 1 {
-		t.Fatalf("got %d change_point and %d stall signals, want 1 of each — the finding is that both fire", len(cp), len(st))
-	}
-	if delta := math.Abs(cp[0].Metrics["delta_mean"]); delta > 0.011 {
-		t.Errorf("delta_mean = %v, want the ~0.01 absolute movement this finding is about", delta)
-	}
-	if cp[0].Metrics["shift"] < 100 {
-		t.Errorf("shift = %v, want >= 100 sigma from a 0.01 absolute move", cp[0].Metrics["shift"])
-	}
-	if cp[0].Strength != 1 {
-		t.Errorf("change_point Strength = %v, want 1", cp[0].Strength)
-	}
-	if st[0].Strength < 0.8 {
-		t.Errorf("stall Strength = %v, want >= 0.8 — the same series is simultaneously called flat", st[0].Strength)
-	}
-
-	// With an absolute floor configured, the change_point is
-	// suppressed and only the stall survives.
-	cfg := advCfg()
-	cfg.ChangePointMinDelta = 0.05
-	if gated := NewChangePoint(cfg).Detect(context.Background(), scope, states); len(gated) != 0 {
-		t.Errorf("got %d change_point signals with MinDelta 0.05, want 0", len(gated))
-	}
-}
-
-// TestFinding_ChangePointPrefersNoisyStepsOverCleanOnes records that
-// adding noise to a step change improves both the split index
-// ChangePoint reports and the strength it assigns.
-//
-// standardisedMeanShift returns +Inf when the pooled spread is zero
-// and the two means differ — a step between two perfectly constant
-// regimes. Detect discards +Inf alongside NaN, so the true maximum
-// is thrown away and a strictly worse split wins.
-//
-// Measured on eight observations:
-//
-//	{1,1,1,1,9,9,9,9}              -> split_index 5, shift 2.45, strength 0.63
-//	{1,1.01,0.99,1,9,9.01,8.99,9}  -> split_index 4, shift 1131,  strength 1.00
-//
-// The first series is the second with the noise removed. Chronos
-// reports the cleaner evidence as the weaker pattern and locates it
-// one observation late.
-func TestFinding_ChangePointPrefersNoisyStepsOverCleanOnes(t *testing.T) {
+// TestChangePointPrefersCleanStepsOverNoisyOnes records that a
+// perfectly constant-regime step wins over a noisy one: +Inf
+// standardised shift is ranked as maximum evidence, not discarded.
+func TestChangePointPrefersCleanStepsOverNoisyOnes(t *testing.T) {
 	scope := uuid.New()
 	clean := NewChangePoint(advCfg()).Detect(context.Background(), scope,
 		advSeries(scope, uuid.New(), time.Minute, []float64{1, 1, 1, 1, 9, 9, 9, 9}))
@@ -930,69 +866,87 @@ func TestFinding_ChangePointPrefersNoisyStepsOverCleanOnes(t *testing.T) {
 	if len(clean) != 1 || len(noisy) != 1 {
 		t.Fatalf("got %d clean and %d noisy signals, want 1 of each", len(clean), len(noisy))
 	}
+	if clean[0].Metrics["split_index"] != 4 {
+		t.Errorf("clean split_index = %v, want 4 (the true split)", clean[0].Metrics["split_index"])
+	}
 	if noisy[0].Metrics["split_index"] != 4 {
-		t.Errorf("noisy split_index = %v, want 4 (the true split)", noisy[0].Metrics["split_index"])
+		t.Errorf("noisy split_index = %v, want 4", noisy[0].Metrics["split_index"])
 	}
-	if clean[0].Metrics["split_index"] == 4 {
-		t.Errorf("clean split_index = 4: the +Inf-discarding behaviour this test records is gone")
-	}
-	if clean[0].Strength >= noisy[0].Strength {
-		t.Errorf("clean Strength %v >= noisy Strength %v: this test exists because the cleaner series scores lower",
+	if clean[0].Strength < noisy[0].Strength {
+		t.Errorf("clean Strength %v < noisy Strength %v: clean regimes must not score weaker",
 			clean[0].Strength, noisy[0].Strength)
+	}
+	if clean[0].Metrics["shift"] != changePointInfiniteShift {
+		t.Errorf("clean shift = %v, want the finite Inf sentinel %v", clean[0].Metrics["shift"], changePointInfiniteShift)
 	}
 	advAssertSane(t, clean)
 	advAssertSane(t, noisy)
 }
 
-// TestFinding_TrendIgnoresTheTimeAxis records that Trend regresses
-// the outcome against the ordinal index, not against the timestamp.
-// A series sampled once a minute and a series whose gaps run from
-// 17 milliseconds to 400 hours produce an identical slope, R2,
-// strength and confidence. The detector documents the ordinal
-// regression; the consequence — that "rate of change" carries no
-// time unit and irregular sampling is invisible — is not documented.
-func TestFinding_TrendIgnoresTheTimeAxis(t *testing.T) {
+// TestAnomalySkipsZeroVectors records that zero-norm feature vectors
+// are not compared: Cosine(0) means "undefined", not "isolated".
+func TestAnomalySkipsZeroVectors(t *testing.T) {
 	scope := uuid.New()
-	ys := advRamp(8, 1, 1)
-	regular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, ys))
-	irregular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeriesAt(scope, uuid.New(), advIrregularOffsets(8), ys))
-	if len(regular) != 1 || len(irregular) != 1 {
-		t.Fatalf("got %d regular and %d irregular signals, want 1 of each", len(regular), len(irregular))
-	}
-	for _, k := range []string{"slope", "r2", "intercept"} {
-		if regular[0].Metrics[k] != irregular[0].Metrics[k] {
-			t.Errorf("%s: regular %v, irregular %v — this test exists because they are currently identical", k, regular[0].Metrics[k], irregular[0].Metrics[k])
-		}
-	}
-	if regular[0].Confidence != irregular[0].Confidence {
-		t.Errorf("Confidence: regular %v, irregular %v", regular[0].Confidence, irregular[0].Confidence)
+	got := NewAnomaly(advCfg()).Detect(context.Background(), scope, advPeerStates(scope, [][]float64{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}))
+	if len(got) != 0 {
+		t.Fatalf("got %d signals, want 0 — identical zero vectors are not anomalies", len(got))
 	}
 }
 
-// TestFinding_AnomalyCallsZeroVectorsIsolated records that a cohort
-// of entities whose feature vectors are all zero is reported as three
-// maximally isolated anomalies.
-//
-// similarity.Cosine returns 0 for a zero vector because it has no
-// direction — "cannot be compared", not "compared and found
-// dissimilar". Anomaly reads that 0 as maximum distance and emits
-// strength 1.0. Entities that are numerically identical are reported
-// as each other's opposites.
-func TestFinding_AnomalyCallsZeroVectorsIsolated(t *testing.T) {
+// TestFinding_ChangePointAndStallDisagreeOnTheSameSeries records that
+// one eight-point series can be called both flat and regime-shifted
+// when ChangePointMinDelta is left at its default of 0. Documented
+// product behaviour: set CHRONOS_CHANGEPOINT_MIN_DELTA to require
+// actionable absolute movement.
+func TestFinding_ChangePointAndStallDisagreeOnTheSameSeries(t *testing.T) {
 	scope := uuid.New()
-	got := NewAnomaly(advCfg()).Detect(context.Background(), scope, advPeerStates(scope, [][]float64{{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}))
-	if len(got) != 3 {
-		t.Fatalf("got %d signals, want 3 (the finding is that identical entities are all called anomalous)", len(got))
+	entity := uuid.New()
+	ys := []float64{1.0000, 1.0001, 1.0000, 1.0001, 1.0100, 1.0101, 1.0100, 1.0101}
+	states := advSeries(scope, entity, time.Minute, ys)
+
+	cp := NewChangePoint(advCfg()).Detect(context.Background(), scope, states)
+	st := NewStall(advCfg()).Detect(context.Background(), scope, states)
+	if len(cp) != 1 {
+		t.Fatalf("got %d change_point signals, want 1", len(cp))
 	}
-	for i, s := range got {
-		if s.Strength != 1 {
-			t.Errorf("signal %d: Strength = %v, want 1 — maximum isolation from an identical peer", i, s.Strength)
-		}
-		if s.Metrics["max_peer_similarity"] != 0 {
-			t.Errorf("signal %d: max_peer_similarity = %v, want 0", i, s.Metrics["max_peer_similarity"])
-		}
+	if len(st) != 1 {
+		t.Fatalf("got %d stall signals, want 1", len(st))
 	}
-	advAssertSane(t, got)
+	cfg := advCfg()
+	cfg.ChangePointMinDelta = 0.05
+	if gated := NewChangePoint(cfg).Detect(context.Background(), scope, states); len(gated) != 0 {
+		t.Errorf("got %d change_point signals with MinDelta 0.05, want 0", len(gated))
+	}
+}
+
+// TestTrendReflectsWallClockSpacing records that Trend regresses
+// outcome against wall-clock hours (trend-v2), so irregular sampling
+// changes the fitted slope relative to a regularly spaced series with
+// the same outcome values.
+func TestTrendReflectsWallClockSpacing(t *testing.T) {
+	scope := uuid.New()
+	ys := advRamp(8, 1, 1)
+	regular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Hour, ys))
+	// Mild irregularity: 0.5h, 1.5h, 0.75h, … — still a clear rising
+	// line, but not uniform cadence.
+	offsets := make([]time.Duration, 8)
+	gaps := []time.Duration{30 * time.Minute, 90 * time.Minute, 45 * time.Minute, 75 * time.Minute}
+	var acc time.Duration
+	for i := range offsets {
+		offsets[i] = acc
+		acc += gaps[i%len(gaps)]
+	}
+	irregular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeriesAt(scope, uuid.New(), offsets, ys))
+	if len(regular) != 1 || len(irregular) != 1 {
+		t.Fatalf("got %d regular and %d irregular signals, want 1 of each", len(regular), len(irregular))
+	}
+	if regular[0].Metrics["slope"] == irregular[0].Metrics["slope"] {
+		t.Errorf("slope identical under irregular spacing (%v): wall-clock axis is not in effect", regular[0].Metrics["slope"])
+	}
+	// Regular hourly +1 outcome → slope ≈ 1.0 per hour.
+	if math.Abs(regular[0].Metrics["slope"]-1) > 1e-9 {
+		t.Errorf("regular slope = %v, want 1.0 (outcome units per hour)", regular[0].Metrics["slope"])
+	}
 }
 
 // TestStallIsSilentWhenItsMetricsOverflow pins the resolution of a

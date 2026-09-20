@@ -70,6 +70,28 @@ func outcomes(states []chronos.EntityState) []float64 {
 	return out
 }
 
+// featureNormSq returns the squared L2 norm of a feature vector.
+// Zero means the vector has no direction — cosine similarity against
+// it is undefined, not "maximally dissimilar".
+func featureNormSq(features []float64) float64 {
+	var n float64
+	for _, v := range features {
+		n += v * v
+	}
+	return n
+}
+
+// meaningfulAbsoluteDeviation reports whether |observed - baseline|
+// is large enough to treat a zero-variance baseline jump as a real
+// outlier rather than float noise. The floor is relative to the
+// baseline magnitude (1e-9 relative) with an absolute backstop of
+// 1e-12 so a zero baseline still requires a non-denormal move.
+func meaningfulAbsoluteDeviation(observed, baseline float64) bool {
+	dev := math.Abs(observed - baseline)
+	floor := math.Max(1e-12, math.Abs(baseline)*1e-9)
+	return dev > floor
+}
+
 // mean returns the arithmetic mean of xs. Returns 0 for an empty slice.
 func mean(xs []float64) float64 {
 	if len(xs) == 0 {

@@ -53,7 +53,7 @@ type scopedSeriesKey struct {
 // CrossDetect computes pairwise correlations across every (scope,
 // series) pair and emits one signal per pair above threshold.
 func (c *CrossScopeCorrelation) CrossDetect(_ context.Context, states []chronos.EntityState) []domain.Signal {
-	if c.cfg.CrossScopeMinPoints < 2 || c.cfg.CrossScopeMin <= 0 {
+	if c.cfg.CrossScopeMinPoints < 3 || c.cfg.CrossScopeMin <= 0 {
 		return nil
 	}
 
@@ -127,7 +127,7 @@ func (c *CrossScopeCorrelation) build(a, b scopedSeriesKey, r float64, n int, sa
 	// The lex-smaller (scope, series) tuple owns the signal; the
 	// other half rides in evidence. Anonymization replaces both
 	// halves with deterministic UUIDv5 hashes so the cross-tenant
-	// statistical insight stays useful without identifying which
+	// statistical perception stays useful without identifying which
 	// tenants paired up.
 	emittedScope, emittedSeries, emittedPartner := a.scope, a.series, b.series
 	if c.cfg.AnonymizeCrossScope {

@@ -14,6 +14,9 @@ func TestEntityState_Validate(t *testing.T) {
 	entityID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	scopeID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 
+	obsID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	ts := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+
 	tests := []struct {
 		name    string
 		state   chronos.EntityState
@@ -22,6 +25,7 @@ func TestEntityState_Validate(t *testing.T) {
 		{
 			name: "valid",
 			state: chronos.EntityState{
+				ID:       obsID,
 				EntityID: entityID,
 				ScopeID:  scopeID,
 				Features: []float64{1, 2, 3},
@@ -29,12 +33,23 @@ func TestEntityState_Validate(t *testing.T) {
 				// field. The wire still defaults an omitted timestamp to
 				// now (internal/api/dto.go), so the tightening applies at
 				// the EntityState boundary only.
-				Timestamp: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC),
+				Timestamp: ts,
 			},
+		},
+		{
+			name: "missing observation ID",
+			state: chronos.EntityState{
+				EntityID:  entityID,
+				ScopeID:   scopeID,
+				Features:  []float64{1, 2, 3},
+				Timestamp: ts,
+			},
+			wantErr: chronos.ErrMissingObservationID,
 		},
 		{
 			name: "missing entity ID",
 			state: chronos.EntityState{
+				ID:       obsID,
 				ScopeID:  scopeID,
 				Features: []float64{1, 2, 3},
 			},
@@ -43,6 +58,7 @@ func TestEntityState_Validate(t *testing.T) {
 		{
 			name: "missing scope ID",
 			state: chronos.EntityState{
+				ID:       obsID,
 				EntityID: entityID,
 				Features: []float64{1, 2, 3},
 			},
@@ -51,6 +67,7 @@ func TestEntityState_Validate(t *testing.T) {
 		{
 			name: "no features",
 			state: chronos.EntityState{
+				ID:       obsID,
 				EntityID: entityID,
 				ScopeID:  scopeID,
 			},
@@ -59,6 +76,7 @@ func TestEntityState_Validate(t *testing.T) {
 		{
 			name: "labels length mismatch",
 			state: chronos.EntityState{
+				ID:       obsID,
 				EntityID: entityID,
 				ScopeID:  scopeID,
 				Features: []float64{1, 2, 3},
@@ -120,6 +138,22 @@ func TestRegistry_RoundTrip(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Adapters() does not contain %q", name)
+	}
+}
+
+func TestRegistry_IsolatedInstances(t *testing.T) {
+	a := chronos.NewRegistry()
+	b := chronos.NewRegistry()
+	name := "isolated-" + time.Now().Format("150405.000000")
+	a.Register(&stubSource{name: name})
+	if _, ok := b.Get(name); ok {
+		t.Fatal("registry B must not see adapters registered on A")
+	}
+	if _, ok := a.Get(name); !ok {
+		t.Fatal("registry A must see its own adapter")
+	}
+	if _, ok := chronos.Get(name); ok {
+		t.Fatal("default registry must not see an isolated registry's adapters")
 	}
 }
 

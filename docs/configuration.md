@@ -13,7 +13,7 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_JOB_TIMEOUT` | `10m` | `compute` | Overall compute timeout (Go duration syntax). |
 | `CHRONOS_SIM_THRESHOLD` | `0.85` | Recurrence | Minimum cosine similarity for a peer to count. |
 | `CHRONOS_MIN_SAMPLE` | `2` | Recurrence | Minimum peer cases required to emit. |
-| `CHRONOS_TREND_MIN_SLOPE` | `0.05` | Trend (Tier B) | Minimum absolute regression slope. |
+| `CHRONOS_TREND_MIN_SLOPE` | `0.05` | Trend (Tier B) | Minimum absolute regression slope in outcome-units per hour. |
 | `CHRONOS_TREND_MIN_POINTS` | `4` | Trend (Tier B) | Minimum observations to consider a trend. |
 | `CHRONOS_SPIKE_Z` | `2.5` | Spike (Tier B) | Absolute z-score threshold for a spike. |
 | `CHRONOS_DROP_Z` | `2.5` | Drop (Tier B) | Absolute z-score threshold for a drop. |

@@ -10,6 +10,7 @@
 //	defer eng.Close()
 //
 //	state := chronos.EntityState{
+//	    ID:        uuid.New(),
 //	    EntityID:  someEntityID,
 //	    ScopeID:   someScopeID,
 //	    Timestamp: time.Now(),
@@ -21,9 +22,9 @@
 //	// or:
 //	signals, err = eng.Query(ctx, embed.QueryOpts{ScopeID: someScopeID})
 //
-// The CLI (`cmd/chronos`) and the HTTP server are unaffected by this
-// package; they remain the recommended path for multi-tenant Chronos
-// deployments. This package is for in-process embedding only.
+// The CLI (`cmd/chronos compute`) dogfoods this package: it constructs
+// an Engine via New, ProcessBatch-es adapter output, then DetectStates.
+// The HTTP `serve` path still wires internal/pipeline directly.
 package embed
 
 import (
@@ -36,6 +37,7 @@ import (
 	"github.com/felixgeelhaar/chronos"
 	"github.com/felixgeelhaar/chronos/internal/config"
 	"github.com/felixgeelhaar/chronos/internal/detect"
+	"github.com/felixgeelhaar/chronos/internal/observability"
 	"github.com/felixgeelhaar/chronos/internal/ports"
 	"github.com/felixgeelhaar/chronos/internal/store"
 	"github.com/google/uuid"
@@ -52,10 +54,9 @@ import (
 	_ "github.com/felixgeelhaar/chronos/internal/store/memory"
 )
 
-// embeddedAdapterName is recorded as the adapter origin for states
-// pushed in via [Engine.Process] / [Engine.ProcessBatch]. The
-// EntityStateRepository requires a non-empty adapter label; for embedded
-// use the actual origin is the host process.
+// embeddedAdapterName is the default adapter origin for states
+// pushed in via [Engine.Process] / [Engine.ProcessBatch]. Override with
+// [WithAdapterName] when the host is a named Source (e.g. cmd/chronos compute).
 const embeddedAdapterName = "embedded"
 
 // Engine is the embeddable in-process Chronos engine. Constructed with
@@ -67,10 +68,12 @@ const embeddedAdapterName = "embedded"
 // [Engine.ProcessBatch]) should be serialised per scope to avoid the
 // detector producing duplicate signals from races.
 type Engine struct {
-	conn     *store.Conn
-	detector *detect.Engine
-	cfg      *config.Config
-	logger   *slog.Logger
+	conn        *store.Conn
+	detector    *detect.Engine
+	cfg         *config.Config
+	logger      *slog.Logger
+	adapterName string
+	signals     ports.SignalRepository
 }
 
 // QueryOpts filters a [Engine.Query] result. At least one of ScopeID or
@@ -90,11 +93,13 @@ type QueryOpts struct {
 // engineConfig is the internal aggregate of all Option choices. Built
 // by [New] from the supplied options.
 type engineConfig struct {
-	storageDSN string
-	logger     *slog.Logger
-	cfg        *config.Config
-	detectors  []detect.Detector
-	parallel   bool
+	storageDSN  string
+	logger      *slog.Logger
+	cfg         *config.Config
+	detectors   []detect.Detector
+	parallel    bool
+	adapterName string
+	metrics     *observability.Metrics
 }
 
 // Option configures [New]. Construct via the With* helpers.
@@ -142,6 +147,19 @@ func WithParallelDetectors() Option {
 	return optionFunc(func(c *engineConfig) { c.parallel = true })
 }
 
+// WithAdapterName sets the adapter label recorded on ingested
+// observations. Defaults to "embedded". cmd/chronos compute passes the
+// Source name so retention and Count stay keyed correctly.
+func WithAdapterName(name string) Option {
+	return optionFunc(func(c *engineConfig) { c.adapterName = name })
+}
+
+// WithDetectorMetrics attaches a metrics registry so Detect records
+// per-pattern latency / emit / skip counters (same as the HTTP server).
+func WithDetectorMetrics(m *observability.Metrics) Option {
+	return optionFunc(func(c *engineConfig) { c.metrics = m })
+}
+
 // New constructs an [Engine] from the supplied options. When no
 // [WithStorage] is supplied the engine boots against an in-process
 // memory store, which is suitable for tests and short-lived demos but
@@ -151,13 +169,17 @@ func WithParallelDetectors() Option {
 // [Engine.Close] when finished.
 func New(opts ...Option) (*Engine, error) {
 	cfg := engineConfig{
-		storageDSN: "memory://?namespace=chronos",
-		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		cfg:        config.Default(),
-		parallel:   false,
+		storageDSN:  "memory://?namespace=chronos",
+		logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cfg:         config.Default(),
+		parallel:    false,
+		adapterName: embeddedAdapterName,
 	}
 	for _, opt := range opts {
 		opt.applyOption(&cfg)
+	}
+	if cfg.adapterName == "" {
+		cfg.adapterName = embeddedAdapterName
 	}
 
 	ctx := context.Background()
@@ -170,24 +192,46 @@ func New(opts ...Option) (*Engine, error) {
 	if cfg.parallel {
 		detector = detector.WithParallelDetectors(true)
 	}
+	if cfg.metrics != nil {
+		detector = detector.WithMetrics(cfg.metrics)
+	}
 
 	return &Engine{
-		conn:     conn,
-		detector: detector,
-		cfg:      cfg.cfg,
-		logger:   cfg.logger,
+		conn:        conn,
+		detector:    detector,
+		cfg:         cfg.cfg,
+		logger:      cfg.logger,
+		adapterName: cfg.adapterName,
+		signals:     conn.Signals,
 	}, nil
+}
+
+// SetSignalRepository replaces the repository Detect uses to persist
+// signals. Intended for in-module hosts (cmd/chronos) that wrap the
+// store with webhook notifiers. Must be called before Detect /
+// DetectStates. External embedders normally leave the default.
+func (e *Engine) SetSignalRepository(repo ports.SignalRepository) {
+	if repo == nil {
+		return
+	}
+	e.signals = repo
+}
+
+// SignalRepository returns the repository Detect currently persists
+// to. Used by cmd/chronos to wrap the store with webhook notifiers.
+func (e *Engine) SignalRepository() ports.SignalRepository {
+	return e.signals
 }
 
 // Process persists a single observation. The state is validated and
 // stored via the engine's EntityStateRepository. Detection is NOT run
-// automatically; call [Engine.Detect] or [Engine.Query] to surface the
-// signals the new state implies.
+// automatically; call [Engine.Detect] or [Engine.DetectStates] to
+// surface the signals the new state implies.
 func (e *Engine) Process(ctx context.Context, state chronos.EntityState) error {
 	if err := state.Validate(); err != nil {
 		return fmt.Errorf("chronos/embed: invalid state: %w", err)
 	}
-	return e.conn.EntityStates.Ingest(ctx, embeddedAdapterName, state)
+	return e.conn.EntityStates.Ingest(ctx, e.adapterName, state)
 }
 
 // ProcessBatch persists a batch of observations atomically (when the
@@ -199,7 +243,7 @@ func (e *Engine) ProcessBatch(ctx context.Context, states []chronos.EntityState)
 			return fmt.Errorf("chronos/embed: invalid state at index %d: %w", i, err)
 		}
 	}
-	return e.conn.EntityStates.Save(ctx, embeddedAdapterName, states)
+	return e.conn.EntityStates.Save(ctx, e.adapterName, states)
 }
 
 // Detect runs the detector set against the entity states currently
@@ -218,13 +262,20 @@ func (e *Engine) Detect(ctx context.Context, scopeIDs []uuid.UUID) ([]chronos.Si
 		}
 		states = append(states, scoped...)
 	}
+	return e.DetectStates(ctx, states)
+}
+
+// DetectStates runs detectors on the supplied observations (without
+// re-loading from storage) and persists any emitted signals. This is
+// the batch-only path cmd/chronos compute uses so a fetch-and-detect
+// run analyses the adapter payload rather than the whole scope history.
+func (e *Engine) DetectStates(ctx context.Context, states []chronos.EntityState) ([]chronos.Signal, error) {
 	if len(states) == 0 {
 		return nil, nil
 	}
-
 	signals := e.detector.Detect(ctx, states)
 	for _, sig := range signals {
-		if err := e.conn.Signals.Save(ctx, sig); err != nil {
+		if err := e.signals.Save(ctx, sig); err != nil {
 			return signals, fmt.Errorf("chronos/embed: persist signal %s: %w", sig.ID, err)
 		}
 	}
@@ -245,7 +296,7 @@ func (e *Engine) Query(ctx context.Context, opts QueryOpts) ([]chronos.Signal, e
 		MinConfidence: opts.MinConfidence,
 		Limit:         opts.Limit,
 	}
-	signals, err := e.conn.Signals.List(ctx, filter)
+	signals, err := e.signals.List(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("chronos/embed: list signals: %w", err)
 	}

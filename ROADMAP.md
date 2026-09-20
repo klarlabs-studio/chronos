@@ -2,7 +2,9 @@
 
 Chronos is the **time / pattern perception** layer of the cognitive stack (Mnemos → Chronos → agent runtimes). The engine is feature-complete for the v1 contract; this roadmap covers what comes next.
 
-## Status (May 2026)
+The authoritative product Intent — principles, detector acceptance criteria, and hardening priorities — is [`docs/intent.md`](docs/intent.md).
+
+## Status (September 2026)
 
 ### ✅ Shipped
 
@@ -11,6 +13,12 @@ Chronos is the **time / pattern perception** layer of the cognitive stack (Mnemo
 - `internal/detect` Engine + eleven detectors: Recurrence, Trend, Spike, Drop, Stall, Anomaly, Seasonality, Correlation, ChangePoint, OutlierCluster, plus CrossScopeCorrelation.
 - `internal/pipeline.Compute` — orchestration: fetch → save → detect → save signals.
 - `internal/similarity` — cosine, weighted, Euclidean.
+
+**Hardening (Intent P0 / P1).**
+- `EntityState.Validate` rejects nil observation ID, nil entity/scope, zero timestamp, non-finite features, and blank labels.
+- Adversarial numerical coverage for all eleven detectors (`internal/detect/adversarial_test.go`).
+- Storage backend conformance suite (`internal/store/conformance`) run by memory, SQLite, libSQL, Postgres, and MySQL.
+- Temporal contract documented in [`docs/temporal-contract.md`](docs/temporal-contract.md).
 
 **Storage (per [Mnemos ADR-0001](https://github.com/felixgeelhaar/Mnemos/blob/main/docs/adr/0001-multi-backend-storage.md)).**
 - `memory://` — in-process backend for tests.
@@ -26,7 +34,7 @@ Chronos is the **time / pattern perception** layer of the cognitive stack (Mnemo
 
 **Infra.**
 - Bearer-token auth on HTTP and gRPC (shares `CHRONOS_API_TOKEN`).
-- Conventional Commits, golangci-lint clean, race-tests green on Go 1.25 and 1.26.
+- Conventional Commits, golangci-lint clean, race-tests green on Go 1.25 (CI matrix).
 - GoReleaser — Docker images and GitHub Release archives.
 - coverctl per-domain coverage gating; nox security baseline.
 
@@ -37,11 +45,21 @@ Chronos is the **time / pattern perception** layer of the cognitive stack (Mnemo
 
 Shipped items from earlier roadmap slices stay checked in git history; they are no longer open work. Remaining scope:
 
-### 1. Capability ports
+### 1. Intent P2 — contract consistency
 
-`ports.TextSearcher` and `ports.VectorSearcher` remain unused. Implement them only when a detector actually needs FTS or embeddings.
+Keep README, package comments, ADRs, CI claims, and [`docs/wire-contract.md`](docs/wire-contract.md) aligned with executable behavior. Treat documentation drift as a defect. Prefer Observation → Detection → Signal language; do not reintroduce “insight / alert / recommendation” vocabulary in engine docs.
 
-### 2. Adapter ecosystem (community-driven)
+### 2. Intent P2 — embeddability
+
+Injectable `chronos.Registry` and `cmd/chronos compute` dogfooding of
+`embed.Engine` are shipped. Optional follow-up: isolate the store-provider
+registry the same way. See [`docs/adr/0001-embeddable-engine-api.md`](docs/adr/0001-embeddable-engine-api.md).
+
+### 3. Capability ports
+
+`ports.TextSearcher` and `ports.VectorSearcher` remain unused. Implement them only when a detector actually needs FTS or embeddings (Intent: statistical methods remain the default).
+
+### 4. Adapter ecosystem (community-driven)
 
 The point of the no-adapters-in-Chronos rule is that adapters live close to their domain. Anticipated near-term integrations from neighbouring projects:
 
@@ -50,11 +68,16 @@ The point of the no-adapters-in-Chronos rule is that adapters live close to thei
 
 Both are out-of-tree adapters. This roadmap tracks them only as expected use cases — implementation belongs to the consuming repo.
 
+### 5. New detectors
+
+Only after the hardening track above. Each candidate must meet the [detector acceptance criteria](docs/intent.md#detector-acceptance-criteria) in the Intent. “No signal” under degenerate input is required.
+
 ## Non-goals
 
 - Becoming a TSDB. Chronos persists what it must to detect; it is not a Prometheus / VictoriaMetrics replacement.
 - Becoming an alerting system. Chronos emits signals; alerting is downstream.
 - Adding domain-specific detectors. The engine is domain-agnostic by design — detectors must work generically over `EntityState` features.
+- Absorbing RCA, remediation, dashboards, LLM reasoning, or recommendation engines. Those may consume Chronos; they do not belong in it. Full list: [`docs/intent.md`](docs/intent.md#non-goals).
 
 ## Versioning policy
 

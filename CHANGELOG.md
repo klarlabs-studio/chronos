@@ -6,7 +6,66 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Added
+- **[`docs/intent.md`](docs/intent.md)** — authoritative product Intent:
+  signals-not-opinions, shape-not-state, input invariants, temporal
+  semantics, numerical robustness, explainability, confidence semantics,
+  storage-as-infrastructure, first-class embedding, wire contracts as
+  public API, detector acceptance criteria, and hardening priorities.
+- **[`docs/temporal-contract.md`](docs/temporal-contract.md)** —
+  deterministic behaviour for observation IDs, timestamps, ordering,
+  duplicate IDs/timestamps, sparse/irregular series, and signal immutability.
+- **Injectable `chronos.Registry`** — `NewRegistry` / method receivers;
+  package-level `Register` / `Get` / `Adapters` delegate to
+  `DefaultRegistry()` so multiple engines can coexist in one process.
+- **Per-detector Strength / Confidence table** in
+  [`docs/wire-contract.md`](docs/wire-contract.md).
+- **Embed temporal-contract integration test** — out-of-order ingest,
+  duplicate ID upsert, duplicate timestamps → Detect determinism.
+- **`embed.WithAdapterName` / `DetectStates` / `SetSignalRepository`** —
+  so `cmd/chronos compute` dogfoods the embed surface while preserving
+  batch-only detect and webhook wrapping.
+
 ### Changed
+- **BREAKING for embedded callers: `EntityState.Validate` rejects a nil
+  observation ID** (`ErrMissingObservationID`). Observation ID is the
+  persistence idempotency key; leaving it nil collapsed every such write
+  onto one row. HTTP, gRPC and MCP already mint a UUID when the wire
+  omits `id`. Callers constructing an `EntityState` directly (including
+  `embed.Engine.Process`) must set `ID` — typically `uuid.New()`.
+- Package and adapter docs drop residual “insight” vocabulary in favour
+  of Observation → Detection → Signal, matching the Intent.
+- **`config.Validate` requires `CorrelationMinPoints` and
+  `CrossScopeMinPoints` ≥ 3** — two aligned points are always collinear,
+  so a floor of 2 manufactured perfect `|r| = 1`. Detectors also refuse
+  floors below 3 as defence in depth. Shipped defaults remain 5.
+- **ADR 0001** updated to describe the shipped `embed/` package and
+  injectable registry (was drafted as root-package `chronos.Engine`).
+- **`cmd/chronos compute` constructs `embed.Engine`** instead of wiring
+  `store.Open` + `pipeline.Compute` directly.
+- **BREAKING wire: Trend is `trend-v2` — OLS against wall-clock hours
+  since window start**, not ordinal index. `slope` is outcome-units per
+  hour. Irregular sampling changes the fitted slope. Equal timestamps
+  yield no signal. `CHRONOS_TREND_MIN_SLOPE` (default 0.05) is interpreted
+  in those units.
+- **SQLite / libSQL timestamps use fixed-width UTC TEXT** (nine
+  fractional digits). Removes `QuirkLexicalSubSecondTime`. Existing DBs
+  are rewritten on Open via `normalizeTimestampText`.
+
+### Fixed
+- **ChangePoint ranks clean constant-regime steps as maximum evidence**
+  instead of discarding `+Inf` standardised shifts and preferring noisy
+  splits. The wire metric stores a finite sentinel (`1e12`).
+- **Anomaly skips zero-norm (and length-mismatched) feature vectors** —
+  cosine similarity against a directionless vector is undefined, not
+  “maximally isolated”.
+- **OutlierCluster ignores denormal absolute deviations** off a
+  zero-variance baseline and derives Confidence as
+  `strength × sampleFactor`, not `strength + 0.3`.
+- **SQLite / libSQL sub-second ORDER BY** matches chronology (was
+  broken by RFC3339Nano trimmed fractional zeros).
+
+### Changed (spike/drop confidence — prior unreleased)
 - **Spike and Drop derive Confidence from the quality of the evidence
   instead of copying Strength.** This changes the confidence number
   emitted for every spike and drop signal, so it wants a minor version
@@ -61,8 +120,6 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   cleanly — the failure mode 0.17.0 fixed in the detectors' arithmetic.
   The new confidence passes through an explicit finiteness guard rather
   than `clamp01`, which returns `NaN` unchanged.
-
-||||||| 1412fc5
 
 ### Changed
 - **BREAKING: `Signal.Validate` rejects non-finite numbers anywhere in a
