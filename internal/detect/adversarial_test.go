@@ -288,16 +288,18 @@ func TestTrend_Adversarial(t *testing.T) {
 		{"negative huge magnitudes", advConst(-advHuge, 12), 0,
 			"same overflow in the negative direction"},
 		{"denormal ramp", []float64{advDenormal, 2 * advDenormal, 3 * advDenormal, 4 * advDenormal, 5 * advDenormal, 6 * advDenormal}, 0,
-			"a perfect line whose slope is 5e-324, far below TrendMinSlope 0.05"},
+			"a perfect line whose wall-clock slope is far below TrendMinSlope 0.05"},
 		{"slope exactly at threshold", advRamp(8, 0, 0.05), 1,
-			"|slope| == TrendMinSlope is not below it, so it emits"},
+			"|slope| == TrendMinSlope (outcome units per hour) is not below it, so it emits"},
 		{"slope just under threshold", advRamp(8, 0, 0.049), 0,
 			"|slope| below TrendMinSlope stays silent"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			d := NewTrend(advCfg())
-			got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, tc.ys))
+			// Hourly spacing so wall-clock slope (per hour) matches the
+			// per-step dy in advRamp for threshold cases.
+			got := d.Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Hour, tc.ys))
 			if len(got) != tc.want {
 				t.Fatalf("got %d signals, want %d (%s)", len(got), tc.want, tc.why)
 			}
@@ -917,24 +919,33 @@ func TestFinding_ChangePointAndStallDisagreeOnTheSameSeries(t *testing.T) {
 	}
 }
 
-// TestFinding_TrendIgnoresTheTimeAxis records that Trend regresses
-// the outcome against the ordinal index, not against the timestamp.
-// Documented in docs/wire-contract.md; wall-clock slope is deferred.
-func TestFinding_TrendIgnoresTheTimeAxis(t *testing.T) {
+// TestTrendReflectsWallClockSpacing records that Trend regresses
+// outcome against wall-clock hours (trend-v2), so irregular sampling
+// changes the fitted slope relative to a regularly spaced series with
+// the same outcome values.
+func TestTrendReflectsWallClockSpacing(t *testing.T) {
 	scope := uuid.New()
 	ys := advRamp(8, 1, 1)
-	regular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, ys))
-	irregular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeriesAt(scope, uuid.New(), advIrregularOffsets(8), ys))
+	regular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Hour, ys))
+	// Mild irregularity: 0.5h, 1.5h, 0.75h, … — still a clear rising
+	// line, but not uniform cadence.
+	offsets := make([]time.Duration, 8)
+	gaps := []time.Duration{30 * time.Minute, 90 * time.Minute, 45 * time.Minute, 75 * time.Minute}
+	var acc time.Duration
+	for i := range offsets {
+		offsets[i] = acc
+		acc += gaps[i%len(gaps)]
+	}
+	irregular := NewTrend(advCfg()).Detect(context.Background(), scope, advSeriesAt(scope, uuid.New(), offsets, ys))
 	if len(regular) != 1 || len(irregular) != 1 {
 		t.Fatalf("got %d regular and %d irregular signals, want 1 of each", len(regular), len(irregular))
 	}
-	for _, k := range []string{"slope", "r2", "intercept"} {
-		if regular[0].Metrics[k] != irregular[0].Metrics[k] {
-			t.Errorf("%s: regular %v, irregular %v — this test exists because they are currently identical", k, regular[0].Metrics[k], irregular[0].Metrics[k])
-		}
+	if regular[0].Metrics["slope"] == irregular[0].Metrics["slope"] {
+		t.Errorf("slope identical under irregular spacing (%v): wall-clock axis is not in effect", regular[0].Metrics["slope"])
 	}
-	if regular[0].Confidence != irregular[0].Confidence {
-		t.Errorf("Confidence: regular %v, irregular %v", regular[0].Confidence, irregular[0].Confidence)
+	// Regular hourly +1 outcome → slope ≈ 1.0 per hour.
+	if math.Abs(regular[0].Metrics["slope"]-1) > 1e-9 {
+		t.Errorf("regular slope = %v, want 1.0 (outcome units per hour)", regular[0].Metrics["slope"])
 	}
 }
 

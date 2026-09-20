@@ -29,7 +29,7 @@ gRPC RPCs match the HTTP surface additively: unary `Ingest` + `IngestBatch`, `Li
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v1`, `trend-v1`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`.
+Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`.
 
 ## Pattern enum
 
@@ -70,7 +70,7 @@ Unless noted otherwise, Confidence is `strength × sampleFactor(n, saturate)`, w
 | Pattern | Strength | Confidence | ConfidenceClass sample basis |
 |---|---|---|---|
 | `recurrence` | mean peer cosine similarity | `strength × sampleFactor(peers, 5)` | peer count vs `MinSampleSize` |
-| `trend` | R² of ordinal OLS | `strength × sampleFactor(n, 2×TrendMinPoints)` | `n` vs `TrendMinPoints` |
+| `trend` | R² of wall-clock OLS | `strength × sampleFactor(n, 2×TrendMinPoints)` | `n` vs `TrendMinPoints` |
 | `spike` / `drop` | `min(\|z\|/5, 1)` | `support × quietness × margin` (see below) | `n` vs `SpikeWindow+1` |
 | `stall` | `1 − normalised_stddev / StallMaxStdDev` | `strength × sampleFactor(n, 2×StallMinPoints)` | `n` vs `StallMinPoints` |
 | `anomaly` | `1 − max_peer_similarity` | `strength × sampleFactor(peers, 5)` | peer count vs `AnomalyMinPeers` |
@@ -80,7 +80,7 @@ Unless noted otherwise, Confidence is `strength × sampleFactor(n, saturate)`, w
 | `outlier_cluster` | how far `member_count` exceeds the floor | `strength × sampleFactor(members, 2×OutlierClusterMinSeries)` | member count vs `OutlierClusterMinSeries` |
 | `cross_scope_correlation` | `\|r\|` | `\|r\| × sampleFactor(n, 2×CrossScopeMinPoints)` | aligned `n` vs `CrossScopeMinPoints` (≥ 3) |
 
-**Trend axis.** Trend regresses outcome against **ordinal index**, not wall-clock time. Irregular sampling does not change slope / R² / strength / confidence. Wall-clock rate-of-change is out of scope for the current detector.
+**Trend axis.** Trend regresses outcome against **wall-clock hours since window start** (`trend-v2`). Slope units are outcome-units per hour. Irregular sampling therefore changes the fitted slope (and typically R²) relative to a regularly spaced series with the same outcome values. Equal timestamps collapse the x-axis and yield no signal.
 
 **Anomaly zero vectors.** Subjects or peers with zero L2 norm are skipped: cosine similarity against a directionless vector is undefined, not “maximally isolated”.
 
@@ -105,7 +105,7 @@ Each detector emits a stable `Evidence.Kind` (single string) and a stable set of
 - **Evidence.Kind**: `regression_summary` — exactly one per signal.
 - **Evidence.Score**: R² of the regression.
 - **Evidence.Metrics** *(equal to Signal.Metrics)*:
-  - `slope` — OLS slope of outcome vs. **ordinal index** (not wall-clock time).
+  - `slope` — OLS slope of outcome vs. wall-clock hours since window start (outcome units per hour).
   - `intercept` — OLS intercept.
   - `r2` — coefficient of determination.
   - `n` — number of observations in the window.

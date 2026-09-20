@@ -203,9 +203,9 @@ func buildDSN(path string) string {
 	return "file:" + path + "?" + q.Encode()
 }
 
-// ensureSchema applies the embedded migration. The migration uses
-// CREATE TABLE / CREATE INDEX in a fresh schema, so we run statements
-// one-at-a-time to satisfy database/sql's prepared-statement model.
+// ensureSchema applies the embedded migration, then rewrites any
+// legacy RFC3339Nano timestamps that trimmed fractional zeros so TEXT
+// ORDER BY matches chronology.
 func ensureSchema(db *sql.DB) error {
 	for _, stmt := range splitStatements(migrationInitial) {
 		s := stripLeadingCommentsAndBlanks(stmt)
@@ -214,6 +214,73 @@ func ensureSchema(db *sql.DB) error {
 		}
 		if _, err := db.Exec(s); err != nil {
 			return fmt.Errorf("apply %q: %w", firstLine(s), err)
+		}
+	}
+	if err := normalizeTimestampText(db); err != nil {
+		return fmt.Errorf("normalize timestamps: %w", err)
+	}
+	return nil
+}
+
+// normalizeTimestampText rewrites time columns to the fixed-width
+// format produced by [formatTime]. Idempotent: rows already in the
+// fixed form are left untouched. Required so databases written before
+// the format change keep chronological ORDER BY / range predicates.
+func normalizeTimestampText(db *sql.DB) error {
+	type col struct {
+		table, column, pk string
+	}
+	cols := []col{
+		{"entity_states", "timestamp", "id"},
+		{"signals", "detected_at", "id"},
+		{"signals", "window_start", "id"},
+		{"signals", "window_end", "id"},
+		{"signal_evidence", "time", "rowid"},
+	}
+	for _, c := range cols {
+		if err := normalizeColumn(db, c.table, c.column, c.pk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeColumn(db *sql.DB, table, column, pk string) error {
+	q := fmt.Sprintf(`SELECT %s, %s FROM %s`, pk, column, table)
+	rows, err := db.Query(q)
+	if err != nil {
+		return fmt.Errorf("%s.%s select: %w", table, column, err)
+	}
+	defer rows.Close()
+
+	type upd struct {
+		id   any
+		next string
+	}
+	var updates []upd
+	for rows.Next() {
+		var id any
+		var raw string
+		if err := rows.Scan(&id, &raw); err != nil {
+			return err
+		}
+		t, err := parseTime(raw)
+		if err != nil || t.IsZero() {
+			continue
+		}
+		next := formatTime(t)
+		if next == raw {
+			continue
+		}
+		updates = append(updates, upd{id: id, next: next})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	stmt := fmt.Sprintf(`UPDATE %s SET %s = ? WHERE %s = ?`, table, column, pk)
+	for _, u := range updates {
+		if _, err := db.Exec(stmt, u.next, u.id); err != nil {
+			return fmt.Errorf("%s.%s update: %w", table, column, err)
 		}
 	}
 	return nil
@@ -262,7 +329,13 @@ func firstLine(s string) string {
 	return s
 }
 
-func formatTime(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+func formatTime(t time.Time) string {
+	// Fixed nine fractional digits so TEXT ORDER BY matches chronology.
+	// time.RFC3339Nano trims trailing zeros, which makes ".1Z" sort after
+	// ".12Z" under byte comparison. See docs/temporal-contract.md and the
+	// former QuirkLexicalSubSecondTime.
+	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
+}
 
 func parseTime(s string) (time.Time, error) {
 	if s == "" {

@@ -15,10 +15,14 @@ import (
 // the outcome metric over the analysis window.
 //
 // Method: ordinary-least-squares linear regression of outcome against
-// ordinal index (0..n-1). The detector emits when |slope| exceeds
-// CHRONOS_TREND_MIN_SLOPE *and* the regression's R² is meaningful.
-// Strength is R² (how cleanly the data is a line); Confidence is R²
-// scaled by a sample-size factor.
+// wall-clock hours since the window start. The detector emits when
+// |slope| exceeds CHRONOS_TREND_MIN_SLOPE *and* the regression's R² is
+// meaningful. Strength is R² (how cleanly the data is a line);
+// Confidence is R² scaled by a sample-size factor.
+//
+// Slope units are outcome-units per hour. Irregular sampling therefore
+// changes the fitted slope relative to an ordinal-index regression
+// (trend-v1). Equal timestamps collapse the x-axis and yield no signal.
 //
 // Evidence: a single "regression_summary" record carrying slope, R²,
 // intercept, and n.
@@ -47,10 +51,7 @@ func (t *Trend) Detect(_ context.Context, scopeID uuid.UUID, states []chronos.En
 			continue
 		}
 		ys := outcomes(observations)
-		xs := make([]float64, len(ys))
-		for i := range ys {
-			xs[i] = float64(i)
-		}
+		xs := wallClockHours(observations)
 		slope, intercept, r2 := linearRegression(xs, ys)
 		if math.Abs(slope) < t.cfg.TrendMinSlope {
 			continue
@@ -95,4 +96,20 @@ func (t *Trend) build(scopeID, series uuid.UUID, observations []chronos.EntitySt
 			Metrics: metrics,
 		}},
 	}
+}
+
+// wallClockHours returns hours elapsed since the first observation.
+// Hours keep CHRONOS_TREND_MIN_SLOPE numerically comparable to the
+// historical per-step threshold when adapters sample near hourly, while
+// still reflecting irregular gaps.
+func wallClockHours(observations []chronos.EntityState) []float64 {
+	xs := make([]float64, len(observations))
+	if len(observations) == 0 {
+		return xs
+	}
+	start := observations[0].Timestamp
+	for i, o := range observations {
+		xs[i] = o.Timestamp.Sub(start).Hours()
+	}
+	return xs
 }

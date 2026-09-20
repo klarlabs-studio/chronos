@@ -9,7 +9,7 @@ CREATE TABLE entity_states (
     id TEXT PRIMARY KEY,
     entity_id TEXT NOT NULL,
     scope_id TEXT NOT NULL,
-    timestamp TEXT NOT NULL,           -- RFC3339Nano
+    timestamp TEXT NOT NULL,           -- fixed-width UTC RFC3339 with 9 fractional digits
     features TEXT NOT NULL,            -- JSON array of float64
     labels TEXT,                       -- JSON array of feature names
     meta TEXT,                         -- JSON object of adapter metadata

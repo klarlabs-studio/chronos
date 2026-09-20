@@ -91,7 +91,7 @@ All env-var driven. Defaults in `config.Default()` (`internal/config/config.go`)
 | `CHRONOS_JOB_TIMEOUT` | `10m` | Compute timeout |
 | `CHRONOS_SIM_THRESHOLD` | `0.85` | Recurrence: min cosine similarity |
 | `CHRONOS_MIN_SAMPLE` | `2` | Recurrence: min peer cases |
-| `CHRONOS_TREND_MIN_SLOPE` | `0.05` | Trend: minimum |slope| (Tier B) |
+| `CHRONOS_TREND_MIN_SLOPE` | `0.05` | Trend: minimum \|slope\| in outcome units per hour |
 | `CHRONOS_TREND_MIN_POINTS` | `4` | Trend: min observations (Tier B) |
 | `CHRONOS_SPIKE_Z` | `2.5` | Spike: |z-score| threshold (Tier B) |
 | `CHRONOS_DROP_Z` | `2.5` | Drop: |z-score| threshold (Tier B) |

@@ -18,10 +18,10 @@ Authoritative Intent and hardening priorities: [`intent.md`](intent.md).
 
 ## Open
 
-### Intent P2 — embeddability follow-ups
+### Intent P2 — store provider registry isolation
 
-Injectable `chronos.Registry` is shipped. Still open: dogfood `embed.Engine`
-from `cmd/chronos compute`; optional isolation of the store-provider registry.
+Optional: injectable store-provider registry mirroring `chronos.Registry`.
+Adapter registry and compute→embed dogfood are done.
 
 ### Capability ports unused
 

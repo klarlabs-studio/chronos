@@ -19,8 +19,6 @@ func TestConformance(t *testing.T) {
 	conformance.Run(t, conformance.Backend{
 		Name:               "libsql",
 		TimestampPrecision: time.Nanosecond,
-		// Inherited from the SQLite repositories this provider reuses.
-		Quirks: []conformance.Quirk{conformance.QuirkLexicalSubSecondTime},
 		New: func(t *testing.T) conformance.Store {
 			dsn := "libsql://" + filepath.Join(t.TempDir(), "chronos.db")
 			conn, err := openProvider(context.Background(), dsn)

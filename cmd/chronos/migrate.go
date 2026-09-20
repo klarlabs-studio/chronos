@@ -43,6 +43,7 @@ var chronosMigrations = []migrationStep{
 	{1, "initial schema (entity_states, signals, signal_evidence) — auto-applied via ensureSchema on Open"},
 	{2, "signals.explanation JSONB column (Refs #21) — auto-applied"},
 	{3, "signals.confidence_class TEXT column (Refs #24) — auto-applied"},
+	{4, "fixed-width UTC timestamps on SQLite/libSQL (nine fractional digits) — auto-applied via normalizeTimestampText on Open"},
 }
 
 // migrateStatusReport is the per-command output shape so tests can

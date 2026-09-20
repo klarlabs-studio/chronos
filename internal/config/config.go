@@ -40,7 +40,7 @@ type Config struct {
 	MinSampleSize       int     // Minimum peer cases to emit a recurrence signal
 
 	// Detection — Trend (Tier B)
-	TrendMinSlope  float64 // Minimum |slope| of normalised regression
+	TrendMinSlope  float64 // Minimum |slope| (outcome units per hour)
 	TrendMinPoints int     // Minimum points to consider a trend
 
 	// Detection — Spike / Drop (Tier B)

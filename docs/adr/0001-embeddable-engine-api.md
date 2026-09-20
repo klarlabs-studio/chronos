@@ -95,7 +95,7 @@ Covered by semantic versioning:
 | `Register` last-write-wins | Done |
 | Injectable `chronos.Registry` | Done |
 | Lifecycle tests against memory store | Done |
-| Refactor `cmd/chronos compute` to dogfood `embed` | Open |
+| Refactor `cmd/chronos compute` to dogfood `embed` | Done |
 | Store provider registry isolation | Open (lower priority) |
 
 ## Alternatives Considered

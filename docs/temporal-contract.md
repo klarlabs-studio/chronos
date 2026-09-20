@@ -21,9 +21,9 @@ It implements Intent principle 4 ([`intent.md`](intent.md)).
 
 ## Timestamps
 
-- `Timestamp` is required and must be non-zero. Wire transports that omit it default to `time.Now().UTC()` before constructing an `EntityState`.
+- Timestamps are required and must be non-zero. Wire transports that omit it default to `time.Now().UTC()` before constructing an `EntityState`.
 - Chronos does **not** reject “extremely old” observations at ingest. Retention (`DeleteOlderThan`) and detection lookback (`ListByScopeSince`) bound what detectors see; age alone is not a validation error.
-- Sub-second timestamp fidelity and ordering are part of the store contract. Where a backend cannot preserve sub-second order, it must declare a conformance `Quirk` rather than silently diverge.
+- Sub-second timestamp fidelity and ordering are part of the store contract. SQLite and libSQL store UTC timestamps as fixed-width TEXT (nine fractional digits) so lexical `ORDER BY` matches chronology. Backends that cannot preserve sub-second order must declare a conformance `Quirk`.
 
 ## Ordering
 
@@ -46,7 +46,7 @@ It implements Intent principle 4 ([`intent.md`](intent.md)).
 ## Duplicate timestamps
 
 - Multiple observations for the same entity at the same timestamp are allowed at the store layer (distinct observation IDs).
-- Detectors must not invent semantics for ties. Prefer algorithms that are well-defined on equal timestamps (e.g. ordinal regression index after the Engine’s sort) or decline to emit when the situation is ambiguous for that detector’s math.
+- Detectors must not invent semantics for ties. Prefer algorithms that are well-defined on equal timestamps (Trend collapses equal times to a zero-width x-axis and emits no signal) or decline to emit when the situation is ambiguous for that detector’s math.
 - Duplicate *observation IDs* are not duplicates in time — they are corrections (see above).
 
 ## Sparse and irregular series

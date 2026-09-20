@@ -7,12 +7,11 @@ import (
 	"log/slog"
 
 	"github.com/felixgeelhaar/chronos"
+	"github.com/felixgeelhaar/chronos/embed"
 	"github.com/felixgeelhaar/chronos/internal/config"
 	"github.com/felixgeelhaar/chronos/internal/notify"
 	"github.com/felixgeelhaar/chronos/internal/observability"
-	"github.com/felixgeelhaar/chronos/internal/pipeline"
 	"github.com/felixgeelhaar/chronos/internal/ports"
-	"github.com/felixgeelhaar/chronos/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -56,34 +55,57 @@ func runCompute(args []string) error {
 	if err != nil {
 		return NewUserError("compute: %v", err)
 	}
-	conn, err := store.Open(ctx, dsn)
-	if err != nil {
-		return NewSystemError(err, "compute: open store: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
 
 	logger := slog.Default().With("cmd", "compute", "adapter", *adapterName)
 	metrics := observability.New()
 
-	// Wrap the signals repository with the configured push transports
-	// so newly-detected signals fan out to webhooks (when configured)
-	// the moment they are persisted. A nil notifier is a no-op.
-	signals := wrapWithNotifier(conn.Signals, buildNotifier(cfg, metrics, logger))
-
-	res, err := pipeline.Compute(ctx, pipeline.ComputeInput{
-		Source:       src,
-		AdapterCfg:   map[string]string{"coach_id": scope, "scope_id": scope},
-		EntityStates: conn.EntityStates,
-		Signals:      signals,
-		Engine:       pipeline.NewEngine(cfg).WithMetrics(metrics),
-		Logger:       logger,
-		Metrics:      metrics,
-	})
+	opts := []embed.Option{
+		embed.WithStorage(dsn),
+		embed.WithDetectionConfig(cfg),
+		embed.WithLogger(logger),
+		embed.WithAdapterName(src.Name()),
+		embed.WithDetectorMetrics(metrics),
+	}
+	if cfg.DetectorParallelism {
+		opts = append(opts, embed.WithParallelDetectors())
+	}
+	eng, err := embed.New(opts...)
 	if err != nil {
-		return NewSystemError(err, "compute: %v", err)
+		return NewSystemError(err, "compute: open embed engine: %v", err)
+	}
+	defer func() { _ = eng.Close() }()
+
+	// Wrap signal persistence with configured push transports so newly
+	// detected signals fan out to webhooks the moment they are saved.
+	if n := buildNotifier(cfg, metrics, logger); n != nil {
+		eng.SetSignalRepository(notify.WrapSignals(eng.SignalRepository(), n))
 	}
 
-	fmt.Printf("Fetched %d entity states; emitted %d signals.\n", res.StatesFetched, res.SignalsCreated)
+	logger.Info("fetch begin", "adapter", src.Name())
+	states, err := src.Fetch(ctx, map[string]string{"coach_id": scope, "scope_id": scope})
+	if err != nil {
+		return NewSystemError(err, "compute: fetch: %v", err)
+	}
+	logger.Info("fetch complete", "adapter", src.Name(), "states", len(states))
+	if len(states) == 0 {
+		fmt.Printf("Fetched 0 entity states; emitted 0 signals.\n")
+		return nil
+	}
+
+	if err := eng.ProcessBatch(ctx, states); err != nil {
+		return NewSystemError(err, "compute: persist states: %v", err)
+	}
+	metrics.ObserveObservations(src.Name(), len(states))
+
+	signals, err := eng.DetectStates(ctx, states)
+	if err != nil {
+		return NewSystemError(err, "compute: detect: %v", err)
+	}
+	for _, sig := range signals {
+		metrics.ObserveSignal(string(sig.Pattern))
+	}
+
+	fmt.Printf("Fetched %d entity states; emitted %d signals.\n", len(states), len(signals))
 	return nil
 }
 

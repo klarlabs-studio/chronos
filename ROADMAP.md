@@ -51,8 +51,8 @@ Keep README, package comments, ADRs, CI claims, and [`docs/wire-contract.md`](do
 
 ### 2. Intent P2 — embeddability
 
-Injectable `chronos.Registry` is shipped. Remaining: dogfood `embed.Engine`
-from `cmd/chronos compute`, and optionally isolate the store-provider
+Injectable `chronos.Registry` and `cmd/chronos compute` dogfooding of
+`embed.Engine` are shipped. Optional follow-up: isolate the store-provider
 registry the same way. See [`docs/adr/0001-embeddable-engine-api.md`](docs/adr/0001-embeddable-engine-api.md).
 
 ### 3. Capability ports

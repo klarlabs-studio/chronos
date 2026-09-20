@@ -22,6 +22,9 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   [`docs/wire-contract.md`](docs/wire-contract.md).
 - **Embed temporal-contract integration test** — out-of-order ingest,
   duplicate ID upsert, duplicate timestamps → Detect determinism.
+- **`embed.WithAdapterName` / `DetectStates` / `SetSignalRepository`** —
+  so `cmd/chronos compute` dogfoods the embed surface while preserving
+  batch-only detect and webhook wrapping.
 
 ### Changed
 - **BREAKING for embedded callers: `EntityState.Validate` rejects a nil
@@ -38,6 +41,16 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   floors below 3 as defence in depth. Shipped defaults remain 5.
 - **ADR 0001** updated to describe the shipped `embed/` package and
   injectable registry (was drafted as root-package `chronos.Engine`).
+- **`cmd/chronos compute` constructs `embed.Engine`** instead of wiring
+  `store.Open` + `pipeline.Compute` directly.
+- **BREAKING wire: Trend is `trend-v2` — OLS against wall-clock hours
+  since window start**, not ordinal index. `slope` is outcome-units per
+  hour. Irregular sampling changes the fitted slope. Equal timestamps
+  yield no signal. `CHRONOS_TREND_MIN_SLOPE` (default 0.05) is interpreted
+  in those units.
+- **SQLite / libSQL timestamps use fixed-width UTC TEXT** (nine
+  fractional digits). Removes `QuirkLexicalSubSecondTime`. Existing DBs
+  are rewritten on Open via `normalizeTimestampText`.
 
 ### Fixed
 - **ChangePoint ranks clean constant-regime steps as maximum evidence**
@@ -49,6 +62,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **OutlierCluster ignores denormal absolute deviations** off a
   zero-variance baseline and derives Confidence as
   `strength × sampleFactor`, not `strength + 0.3`.
+- **SQLite / libSQL sub-second ORDER BY** matches chronology (was
+  broken by RFC3339Nano trimmed fractional zeros).
 
 ### Changed (spike/drop confidence — prior unreleased)
 - **Spike and Drop derive Confidence from the quality of the evidence
