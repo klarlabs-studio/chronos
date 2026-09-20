@@ -220,3 +220,57 @@ func TestRegister_PanicsOnNilFunc(t *testing.T) {
 	}()
 	store.Register("nilfn", nil)
 }
+
+func TestRegistry_CloneIsolatesRegistration(t *testing.T) {
+	base := store.DefaultRegistry().Clone()
+	isolated := base.Clone()
+
+	opened := false
+	isolated.Register("fakestore", func(context.Context, string) (*store.Conn, error) {
+		opened = true
+		return &store.Conn{}, nil
+	})
+
+	// Clone must not see schemes registered only on the sibling.
+	if _, err := base.Open(context.Background(), "fakestore://"); err == nil {
+		t.Fatal("base registry must not resolve scheme registered only on clone")
+	}
+	conn, err := isolated.Open(context.Background(), "fakestore://x")
+	if err != nil {
+		t.Fatalf("isolated.Open: %v", err)
+	}
+	_ = conn.Close()
+	if !opened {
+		t.Fatal("expected fake OpenFunc to run on isolated registry")
+	}
+
+	// Default registry must remain untouched.
+	for _, s := range store.SupportedSchemes() {
+		if s == "fakestore" {
+			t.Fatal("default registry must not gain schemes registered on a clone")
+		}
+	}
+}
+
+func TestRegistry_OpenRejectsUnknownScheme(t *testing.T) {
+	r := store.NewRegistry()
+	_, err := r.Open(context.Background(), "memory://")
+	if err == nil {
+		t.Fatal("empty registry must reject memory://")
+	}
+	if !strings.Contains(err.Error(), "unknown provider") {
+		t.Errorf("error = %q", err.Error())
+	}
+}
+
+func TestRegistry_CloneCopiesExistingSchemes(t *testing.T) {
+	r := store.DefaultRegistry().Clone()
+	conn, err := r.Open(context.Background(), "memory://?namespace=clone_test")
+	if err != nil {
+		t.Fatalf("Clone().Open(memory): %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if conn.EntityStates == nil {
+		t.Fatal("expected repositories on cloned-registry Conn")
+	}
+}

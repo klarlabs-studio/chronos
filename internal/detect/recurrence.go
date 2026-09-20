@@ -57,7 +57,8 @@ func (r *Recurrence) Detect(_ context.Context, scopeID uuid.UUID, states []chron
 func mostRecentByEntity(states []chronos.EntityState) map[uuid.UUID]chronos.EntityState {
 	latest := make(map[uuid.UUID]chronos.EntityState)
 	for _, s := range states {
-		if cur, ok := latest[s.EntityID]; !ok || s.Timestamp.After(cur.Timestamp) {
+		cur, ok := latest[s.EntityID]
+		if !ok || afterByTimeThenID(s, cur) {
 			latest[s.EntityID] = s
 		}
 	}
@@ -66,13 +67,21 @@ func mostRecentByEntity(states []chronos.EntityState) map[uuid.UUID]chronos.Enti
 
 // gatherEvidence finds peer states (different entity, strictly earlier
 // in time) whose features are sufficiently similar to the subject.
+// Length-mismatched or zero-norm vectors are skipped — cosine against
+// them is undefined, not "dissimilar" (same fail-closed rule as Anomaly).
 func (r *Recurrence) gatherEvidence(subjectID uuid.UUID, subject chronos.EntityState, all []chronos.EntityState) []domain.Evidence {
+	if featureNormSq(subject.Features) == 0 {
+		return nil
+	}
 	var ev []domain.Evidence
 	for _, candidate := range all {
 		if candidate.EntityID == subjectID {
 			continue
 		}
 		if !candidate.Timestamp.Before(subject.Timestamp) {
+			continue
+		}
+		if len(candidate.Features) != len(subject.Features) || featureNormSq(candidate.Features) == 0 {
 			continue
 		}
 		sim := similarity.Cosine(subject.Features, candidate.Features)

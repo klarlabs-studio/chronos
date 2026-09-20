@@ -66,7 +66,7 @@ func (c *CrossScopeCorrelation) CrossDetect(_ context.Context, states []chronos.
 	keys := make([]scopedSeriesKey, 0, len(groups))
 	for k := range groups {
 		sort.SliceStable(groups[k], func(i, j int) bool {
-			return groups[k][i].Timestamp.Before(groups[k][j].Timestamp)
+			return beforeByTimeThenID(groups[k][i], groups[k][j])
 		})
 		if len(groups[k]) >= c.cfg.CrossScopeMinPoints {
 			keys = append(keys, k)

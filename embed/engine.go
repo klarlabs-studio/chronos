@@ -93,13 +93,14 @@ type QueryOpts struct {
 // engineConfig is the internal aggregate of all Option choices. Built
 // by [New] from the supplied options.
 type engineConfig struct {
-	storageDSN  string
-	logger      *slog.Logger
-	cfg         *config.Config
-	detectors   []detect.Detector
-	parallel    bool
-	adapterName string
-	metrics     *observability.Metrics
+	storageDSN    string
+	storeRegistry *store.Registry
+	logger        *slog.Logger
+	cfg           *config.Config
+	detectors     []detect.Detector
+	parallel      bool
+	adapterName   string
+	metrics       *observability.Metrics
 }
 
 // Option configures [New]. Construct via the With* helpers.
@@ -117,6 +118,18 @@ func (f optionFunc) applyOption(c *engineConfig) { f(c) }
 // consuming program. The default is "memory://?namespace=chronos".
 func WithStorage(dsn string) Option {
 	return optionFunc(func(c *engineConfig) { c.storageDSN = dsn })
+}
+
+// WithStoreRegistry overrides the provider registry used to resolve
+// the storage DSN. Defaults to [store.DefaultRegistry]. In-module
+// hosts and tests that need an isolated provider set pass
+// store.DefaultRegistry().Clone() (or a [store.NewRegistry]) so
+// Register calls do not affect other engines in the same process.
+//
+// External embedders normally leave this unset and blank-import the
+// public storage/* shims, which register on the default registry.
+func WithStoreRegistry(r *store.Registry) Option {
+	return optionFunc(func(c *engineConfig) { c.storeRegistry = r })
 }
 
 // WithLogger overrides the [slog.Logger] the engine uses for internal
@@ -183,7 +196,11 @@ func New(opts ...Option) (*Engine, error) {
 	}
 
 	ctx := context.Background()
-	conn, err := store.Open(ctx, cfg.storageDSN)
+	reg := cfg.storeRegistry
+	if reg == nil {
+		reg = store.DefaultRegistry()
+	}
+	conn, err := reg.Open(ctx, cfg.storageDSN)
 	if err != nil {
 		return nil, fmt.Errorf("chronos/embed: open storage %q: %w", cfg.storageDSN, err)
 	}

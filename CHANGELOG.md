@@ -18,6 +18,10 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **Injectable `chronos.Registry`** — `NewRegistry` / method receivers;
   package-level `Register` / `Get` / `Adapters` delegate to
   `DefaultRegistry()` so multiple engines can coexist in one process.
+- **Injectable `store.Registry`** — `NewRegistry` / `Clone` / method
+  receivers; package-level `Register` / `Open` / `SupportedSchemes`
+  delegate to `DefaultRegistry()`. Duplicate schemes still panic.
+  `embed.WithStoreRegistry` opens storage against an isolated registry.
 - **Per-detector Strength / Confidence table** in
   [`docs/wire-contract.md`](docs/wire-contract.md).
 - **Embed temporal-contract integration test** — out-of-order ingest,
@@ -40,7 +44,7 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
   so a floor of 2 manufactured perfect `|r| = 1`. Detectors also refuse
   floors below 3 as defence in depth. Shipped defaults remain 5.
 - **ADR 0001** updated to describe the shipped `embed/` package and
-  injectable registry (was drafted as root-package `chronos.Engine`).
+  injectable registries (was drafted as root-package `chronos.Engine`).
 - **`cmd/chronos compute` constructs `embed.Engine`** instead of wiring
   `store.Open` + `pipeline.Compute` directly.
 - **BREAKING wire: Trend is `trend-v2` — OLS against wall-clock hours
@@ -51,6 +55,9 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **SQLite / libSQL timestamps use fixed-width UTC TEXT** (nine
   fractional digits). Removes `QuirkLexicalSubSecondTime`. Existing DBs
   are rewritten on Open via `normalizeTimestampText`.
+- **Engine sorts observations by `(timestamp, observation ID)`** before
+  detection. Equal-timestamp ties are broken by lexicographic ID;
+  `mostRecentByEntity` uses the same total order.
 
 ### Fixed
 - **ChangePoint ranks clean constant-regime steps as maximum evidence**
@@ -59,6 +66,9 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 - **Anomaly skips zero-norm (and length-mismatched) feature vectors** —
   cosine similarity against a directionless vector is undefined, not
   “maximally isolated”.
+- **Recurrence skips zero-norm and length-mismatched peer vectors** —
+  same fail-closed rule as Anomaly; Cosine returning 0 is not treated
+  as evidence of dissimilarity.
 - **OutlierCluster ignores denormal absolute deviations** off a
   zero-variance baseline and derives Confidence as
   `strength × sampleFactor`, not `strength + 0.3`.

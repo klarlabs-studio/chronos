@@ -2,11 +2,13 @@
 // scheme-dispatched factory.
 //
 // Each provider (memory, sqlite, postgres, libsql, mysql, ...) lives
-// in a subpackage and registers itself in init() with [Register].
-// Consumers blank-import the providers they want to support and open
-// connections by DSN through [Open]. The factory dispatches on the
-// URL scheme so new providers can be added without touching this
-// package.
+// in a subpackage and registers itself in init() with [Register] on
+// the process-wide [DefaultRegistry]. Consumers blank-import the
+// providers they want to support and open connections by DSN through
+// [Open]. Isolated [Registry] instances ([NewRegistry], [Registry.Clone])
+// let multiple engines coexist without sharing registration state.
+// The factory dispatches on the URL scheme so new providers can be
+// added without touching this package.
 //
 // This pattern mirrors Mnemos's ADR 0001 across the cognitive stack
 // (Mnemos, Chronos, and sibling tools): the factory contract, URL
@@ -93,31 +95,47 @@ func (c *Conn) InTx(ctx context.Context, fn func(context.Context) error) error {
 	return c.Tx(ctx, fn)
 }
 
-var (
-	registryMu sync.RWMutex
-	registry   = map[string]OpenFunc{}
-)
+// Registry holds URL-scheme → OpenFunc bindings. Construct with
+// [NewRegistry] (or [Registry.Clone] of [DefaultRegistry]) when a
+// process needs isolated provider sets — for example two embed.Engine
+// instances that must not share registration state, or a test that
+// registers a fake scheme without polluting the process-wide map.
+//
+// Package-level [Register] / [Open] / [SupportedSchemes] delegate to
+// [DefaultRegistry]. Unlike [chronos.Registry] (last-write-wins on
+// adapter names), provider registration panics on duplicate schemes so
+// collisions surface at startup rather than silently shadowing.
+type Registry struct {
+	mu       sync.RWMutex
+	byScheme map[string]OpenFunc
+}
 
-// Register associates a URL scheme with a provider factory. Providers
-// invoke this from init(); duplicate registration panics so collisions
-// surface at startup rather than silently shadowing.
-func Register(scheme string, fn OpenFunc) {
+// NewRegistry returns an empty provider registry.
+func NewRegistry() *Registry {
+	return &Registry{byScheme: make(map[string]OpenFunc)}
+}
+
+// Register associates a URL scheme with a provider factory on this
+// registry. Panics on empty scheme, nil OpenFunc, or a duplicate
+// scheme already present.
+func (r *Registry) Register(scheme string, fn OpenFunc) {
 	if scheme == "" {
 		panic("store: cannot register provider with empty scheme")
 	}
 	if fn == nil {
 		panic("store: cannot register nil OpenFunc for " + scheme)
 	}
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if _, dup := registry[scheme]; dup {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, dup := r.byScheme[scheme]; dup {
 		panic("store: duplicate provider registration for " + scheme)
 	}
-	registry[scheme] = fn
+	r.byScheme[scheme] = fn
 }
 
-// Open opens a backend by DSN. The DSN's URL scheme picks the
-// provider; everything after the scheme is provider-specific.
+// Open opens a backend by DSN against this registry. The DSN's URL
+// scheme picks the provider; everything after the scheme is
+// provider-specific.
 //
 // Examples:
 //
@@ -126,37 +144,73 @@ func Register(scheme string, fn OpenFunc) {
 //	postgres://user:pw@host:5432/cogstack?namespace=chronos
 //	mysql://user:pw@host:3306/?namespace=chronos
 //	libsql://my-db.turso.io?authToken=...
-//
-// The matching provider must have been blank-imported by the binary
-// (e.g. _ "github.com/felixgeelhaar/chronos/internal/store/sqlite") so
-// that its init() runs before Open is called.
-func Open(ctx context.Context, dsn string) (*Conn, error) {
+func (r *Registry) Open(ctx context.Context, dsn string) (*Conn, error) {
 	scheme, _, ok := strings.Cut(dsn, "://")
 	if !ok || scheme == "" {
 		return nil, fmt.Errorf("store: dsn %q missing scheme://", dsn)
 	}
-	registryMu.RLock()
-	fn, found := registry[scheme]
-	registryMu.RUnlock()
+	r.mu.RLock()
+	fn, found := r.byScheme[scheme]
+	r.mu.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("store: unknown provider %q (registered: %v)",
-			scheme, SupportedSchemes())
+			scheme, r.Schemes())
 	}
 	return fn(ctx, dsn)
 }
 
-// SupportedSchemes returns the registered scheme names in sorted
-// order. Useful for error messages and CLI help.
-func SupportedSchemes() []string {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	out := make([]string, 0, len(registry))
-	for k := range registry {
+// Schemes returns the registered scheme names in sorted order.
+func (r *Registry) Schemes() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.byScheme))
+	for k := range r.byScheme {
 		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
 }
+
+// Clone returns a new Registry whose scheme map is a snapshot of r.
+// OpenFuncs are copied by reference (they are typically package-level
+// functions). Subsequent Register calls on the clone or the original
+// do not affect each other.
+func (r *Registry) Clone() *Registry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := NewRegistry()
+	for k, fn := range r.byScheme {
+		out.byScheme[k] = fn
+	}
+	return out
+}
+
+// defaultRegistry is the process-wide convenience registry. Providers
+// register into it from init(); prefer [NewRegistry] or
+// [Registry.Clone] when embedding multiple independently configured
+// Chronos engines that need isolated provider sets.
+var defaultRegistry = NewRegistry()
+
+// DefaultRegistry returns the process-wide provider registry used by
+// [Register], [Open], and [SupportedSchemes].
+func DefaultRegistry() *Registry { return defaultRegistry }
+
+// Register associates a URL scheme with a provider factory on the
+// default registry. Providers invoke this from init(). See
+// [Registry.Register].
+func Register(scheme string, fn OpenFunc) { defaultRegistry.Register(scheme, fn) }
+
+// Open opens a backend by DSN against the default registry. The
+// matching provider must have been blank-imported by the binary
+// (e.g. _ "github.com/felixgeelhaar/chronos/internal/store/sqlite") so
+// that its init() runs before Open is called. See [Registry.Open].
+func Open(ctx context.Context, dsn string) (*Conn, error) {
+	return defaultRegistry.Open(ctx, dsn)
+}
+
+// SupportedSchemes returns the schemes registered on the default
+// registry in sorted order. Useful for error messages and CLI help.
+func SupportedSchemes() []string { return defaultRegistry.Schemes() }
 
 // namespaceRE mirrors the Mnemos ADR 0001 namespace contract:
 // lowercase alphanumeric+underscore, must start with a letter,

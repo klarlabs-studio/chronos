@@ -7,6 +7,9 @@ Authoritative Intent and hardening priorities: [`intent.md`](intent.md).
 ## Recently shipped
 
 - **Chronos Intent** — [`docs/intent.md`](intent.md) as the product north star; [`docs/temporal-contract.md`](temporal-contract.md) for ordering and duplicate semantics; `EntityState.Validate` rejects nil observation IDs.
+- **Injectable `store.Registry`** — isolated provider sets via `NewRegistry` / `Clone` / `embed.WithStoreRegistry`; package-level `Register` / `Open` still panic on duplicate schemes.
+- **Equal-timestamp total order** — Engine and peer detectors sort / pick "most recent" by `(timestamp, observation ID)`.
+- **Recurrence fail-closed on ragged / zero-norm vectors** — same rule as Anomaly.
 - **gRPC transport parity** — Additive RPCs: `IngestBatch`, `StreamSignals`, `ValidateConfig`, `ExportFederation`, plus `since_cursor` / `next_cursor` on `ListSignals`. Unary `Ingest` unchanged. Schema in `api/proto/chronos/v1/chronos.proto`.
 - **Detector explainability** — all eleven detectors populate `Signal.Explanation`.
 - **Scheduler same-window skip** plus **content-addressed `PerceptionID`** (UUID v5). Unchanged windows upsert; growing `window.End` still emits a new row.
@@ -17,11 +20,6 @@ Authoritative Intent and hardening priorities: [`intent.md`](intent.md).
 - **Input invariants, adversarial detector coverage, store conformance** (0.17.0).
 
 ## Open
-
-### Intent P2 — store provider registry isolation
-
-Optional: injectable store-provider registry mirroring `chronos.Registry`.
-Adapter registry and compute→embed dogfood are done.
 
 ### Capability ports unused
 

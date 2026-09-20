@@ -7,6 +7,7 @@ import (
 
 	"github.com/felixgeelhaar/chronos"
 	"github.com/felixgeelhaar/chronos/embed"
+	"github.com/felixgeelhaar/chronos/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -102,5 +103,32 @@ func TestClose_Idempotent(t *testing.T) {
 	}
 	if err := eng.Close(); err != nil {
 		t.Errorf("second Close: %v (expected nil)", err)
+	}
+}
+
+// TestWithStoreRegistry_UsesIsolatedProviders verifies an Engine can
+// open storage against a cloned registry without touching the default.
+func TestWithStoreRegistry_UsesIsolatedProviders(t *testing.T) {
+	t.Parallel()
+	reg := store.DefaultRegistry().Clone()
+	eng, err := embed.New(
+		embed.WithStorage("memory://?namespace=chronos_embed_registry_test"),
+		embed.WithStoreRegistry(reg),
+	)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = eng.Close() }()
+
+	scope := uuid.New()
+	state := chronos.EntityState{
+		ID:        uuid.New(),
+		EntityID:  uuid.New(),
+		ScopeID:   scope,
+		Timestamp: time.Now().UTC(),
+		Features:  []float64{1.0},
+	}
+	if err := eng.Process(context.Background(), state); err != nil {
+		t.Fatalf("Process: %v", err)
 	}
 }
