@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-21
+
 ### Changed
 
 - **BREAKING (fewer signals, same HTTP shape).** Correlation, Cross-Scope Correlation, Divergence, and Convergence no longer pair observations by slice index. They use a shared nearest-within alignment (`CHRONOS_ALIGN_TOLERANCE`, default `0` = exact timestamps) and count **aligned pairs** toward the minimum sample. Disjoint clocks that happen to share a shape emit nothing. Pairwise signal windows span only the aligned observations. Detector versions: `correlation-v2`, `cross_scope_correlation-v2`. See [`docs/temporal-semantics.md`](docs/temporal-semantics.md).
@@ -16,6 +18,7 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 - Shared internal alignment (`AlignNearest`): exact or nearest-within, one observation per pair, deterministic tie-break, no interpolation.
 - Pairwise metrics `aligned_samples` and `alignment_tolerance_seconds`. Divergence/Convergence also report `r_squared` (same value as `r2`).
+- **[`docs/temporal-semantics.md`](docs/temporal-semantics.md)** — ordinal / temporal-rate / temporally relational / temporal-periodic taxonomy for detectors.
 
 ## [0.18.0] - 2026-09-20
 
