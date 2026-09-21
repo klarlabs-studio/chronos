@@ -29,7 +29,9 @@ gRPC RPCs match the HTTP surface additively: unary `Ingest` + `IngestBatch`, `Li
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v1`, `correlation-v1`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v1`, `oscillation-v1`, `divergence-v1`, `convergence-v1`.
+Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v2`, `correlation-v2`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v2`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
+
+Which detectors treat time as order, as a rate, as a join, or as a period is in [`temporal-semantics.md`](temporal-semantics.md).
 
 ## Pattern enum
 
@@ -77,16 +79,16 @@ Unless noted otherwise, Confidence is `strength × sampleFactor(n, saturate)`, w
 | `spike` / `drop` | `min(\|z\|/5, 1)` | `support × quietness × margin` (see below) | `n` vs `SpikeWindow+1` |
 | `stall` | `1 − normalised_stddev / StallMaxStdDev` | `strength × sampleFactor(n, 2×StallMinPoints)` | `n` vs `StallMinPoints` |
 | `anomaly` | `1 − max_peer_similarity` | `strength × sampleFactor(peers, 5)` | peer count vs `AnomalyMinPeers` |
-| `seasonality` | peak autocorrelation | `strength × sampleFactor(n, 2×SeasonalityMinPoints)` | `n` vs `SeasonalityMinPoints` |
-| `correlation` | `\|r\|` | `strength × sampleFactor(n, 2×CorrelationMinPoints)` | aligned `n` vs `CorrelationMinPoints` (≥ 3) |
+| `seasonality` | peak autocorrelation, only after a regular cadence check | `strength × sampleFactor(n, 2×SeasonalityMinPoints)` | `n` vs `SeasonalityMinPoints` |
+| `correlation` | `\|r\|` on temporally aligned pairs | `strength × sampleFactor(n, 2×CorrelationMinPoints)` | aligned `n` vs `CorrelationMinPoints` (≥ 3) |
 | `change_point` | scaled standardised shift (Inf → 1.0) | `strength × sampleFactor(n, 2×ChangePointMinPoints)` | `n` vs `ChangePointMinPoints` |
 | `outlier_cluster` | how far `member_count` exceeds the floor | `strength × sampleFactor(members, 2×OutlierClusterMinSeries)` | member count vs `OutlierClusterMinSeries` |
 | `cross_scope_correlation` | `\|r\|` | `\|r\| × sampleFactor(n, 2×CrossScopeMinPoints)` | aligned `n` vs `CrossScopeMinPoints` (≥ 3) |
 | `oscillation` | sign-flip rate among meaningful first-differences | `strength × sampleFactor(n, 2×OscillationMinPoints)` | `n` vs `OscillationMinPoints` |
-| `divergence` | scaled positive gap slope × fit quality | `strength × sampleFactor(n, 2×DivergenceMinPoints)` | aligned `n` vs `DivergenceMinPoints` (≥ 3) |
-| `convergence` | scaled \|negative\| gap slope × fit quality | `strength × sampleFactor(n, 2×ConvergenceMinPoints)` | aligned `n` vs `ConvergenceMinPoints` (≥ 3) |
+| `divergence` | scaled positive gap slope (per hour) × R² | `sampleFactor(aligned n, 2×DivergenceMinPoints) × alignment quality` — not × strength | aligned `n` vs `DivergenceMinPoints` (≥ 3) |
+| `convergence` | scaled \|negative\| gap slope (per hour) × R² | `sampleFactor(aligned n, 2×ConvergenceMinPoints) × alignment quality` — not × strength | aligned `n` vs `ConvergenceMinPoints` (≥ 3) |
 
-**Trend axis.** Trend regresses outcome against **wall-clock hours since window start** (`trend-v2`). Slope units are outcome-units per hour. Irregular sampling therefore changes the fitted slope (and typically R²) relative to a regularly spaced series with the same outcome values. Equal timestamps collapse the x-axis and yield no signal.
+**Trend axis.** Trend regresses outcome against **wall-clock hours since window start** (`trend-v2`). Slope units are outcome-units per hour. This is the reference convention for rate-like detectors. Irregular sampling therefore changes the fitted slope (and typically R²) relative to a regularly spaced series with the same outcome values. Equal timestamps collapse the x-axis and yield no signal. Do not read Trend's slope as a per-sample increment.
 
 **Anomaly zero vectors.** Subjects or peers with zero L2 norm are skipped: cosine similarity against a directionless vector is undefined, not “maximally isolated”.
 
@@ -154,23 +156,32 @@ Spike and Drop share the same evidence shape; sign of `z` distinguishes them.
 
 ### Seasonality — `Pattern: "seasonality"`
 
+Autocorrelation is interpreted as a wall-clock period only when the sampling cadence is regular (`seasonality-v2`). Inter-observation intervals must be positive and their coefficient of variation must be at most `CHRONOS_SEASONALITY_MAX_INTERVAL_CV` (default `0`, exact spacing). Irregular, duplicate, or reversed timestamps emit no signal. There is no resampling.
+
 - **Evidence.Kind**: `autocorrelation_peak` — exactly one per signal.
 - **Evidence.Score**: autocorrelation value at the peak lag.
 - **Evidence.Metrics** *(equal to Signal.Metrics)*:
-  - `period` — lag at which autocorrelation peaks (in samples; multiply by the adapter's cadence to get wall-clock period).
+  - `period` — lag at which autocorrelation peaks, **in samples**. Unchanged from `seasonality-v1`. Multiply by `sampling_interval_seconds` (or read `period_seconds`) for the clock period. Do not treat this number as seconds.
+  - `period_samples` — same value as `period`, named so the unit is explicit.
+  - `period_seconds` — `period_samples × sampling_interval_seconds` (median positive interval).
+  - `sampling_interval_seconds` — median inter-observation interval, in seconds.
   - `autocorrelation` — the peak Pearson autocorrelation.
   - `n` — number of observations.
 
 ### Correlation — `Pattern: "correlation"`
 
-One signal per pair, deterministically owned by the lex-smaller series ID; the partner appears in evidence.
+Pearson `r` is computed on temporally aligned pairs (`correlation-v2`), not on slice indexes. `CHRONOS_ALIGN_TOLERANCE` is `0` by default (timestamps must be equal). `n` counts aligned pairs. A morning series and an afternoon series with the same values produce no signal when no pair falls inside the tolerance.
+
+One signal per pair, deterministically owned by the lex-smaller series ID; the partner appears in evidence. The window runs from the earliest aligned timestamp to the latest, not across observations that were excluded.
 
 - **Evidence.Kind**: `pair_correlation` — exactly one per signal, pointing at the partner series.
 - **Evidence.Score**: `|r|`.
 - **Evidence.Metrics** *(equal to Signal.Metrics)*:
-  - `r` — signed Pearson correlation.
+  - `r` — signed Pearson correlation of the aligned outcomes.
   - `abs_r` — `|r|`.
-  - `n` — number of aligned observations.
+  - `n` — number of aligned pairs (not the raw length of either series).
+  - `aligned_samples` — same count as `n`, named so consumers do not read it as raw history length.
+  - `alignment_tolerance_seconds` — the tolerance that was in force (`0` = exact).
   - `direction` — `+1` for positive `r`, `-1` for negative, `0` for zero.
 
 ### ChangePoint — `Pattern: "change_point"`
@@ -204,17 +215,18 @@ Cohort-level signal: multiple series in the same scope went anomalous around the
 
 ### CrossScopeCorrelation — `Pattern: "cross_scope_correlation"`
 
-Two series in DIFFERENT scopes that move together. Same-scope pairs are handled by `correlation`.
+Two series in DIFFERENT scopes that move together at corresponding times. Same alignment contract as `correlation` (`cross_scope_correlation-v2`): scope boundaries do not relax the requirement that the observations were contemporaneous. Same-scope pairs are handled by `correlation`.
 
 - **ScopeID**: lex-smaller of the two participating scopes.
 - **Series**: lex-smaller series within the chosen scope.
 - **Evidence.Kind**: `cross_scope_pair` — exactly one row, pointing at the partner series.
 - **Evidence.Score**: `|r|`.
-- **Signal.Metrics**: same shape as `correlation` (`r`, `abs_r`, `n`, `direction`).
+- **Signal.Metrics**: `r`, `abs_r`, `n`, `aligned_samples`, `alignment_tolerance_seconds`, `direction`. The window spans the aligned pairs only.
+- **Evidence.Metrics**: `partner_scope_id_lex_max`, `r`, `n`, `aligned_samples`, `alignment_tolerance_seconds`.
 
 ### Oscillation — `Pattern: "oscillation"`
 
-Repeated direction reversals in a single series' outcome. Distinct from Seasonality (periodic autocorrelation peak) and Stall (too few meaningful differences to accumulate flips).
+Repeated direction reversals across successive observations. This is an **ordinal** pattern (`oscillation-v1`): identical value order yields the same result at any timestamp spacing. It is not a frequency. Seasonality is the detector that claims a clock period, and only when cadence is regular.
 
 - **Evidence.Kind**: `sign_flip_rate` — one record for the analysis window.
 - **Evidence.Score**: flip rate in `[0, 1]`.
@@ -226,26 +238,37 @@ Repeated direction reversals in a single series' outcome. Distinct from Seasonal
 
 ### Divergence — `Pattern: "divergence"`
 
-Two series in the same scope whose absolute outcome gap is growing. OLS slope of `|a−b|` against ordinal index over the aligned tail.
+Two series in the same scope whose absolute outcome gap is growing over wall-clock time (`divergence-v2`).
+
+Pipeline: align the series (`CHRONOS_ALIGN_TOLERANCE`), form `gap = |A − B|` on each pair, regress that gap against **hours since the first pair's anchor**. Emit only when `slope ≥ CHRONOS_DIVERGENCE_MIN_SLOPE` (gap units per hour) and `R² ≥ CHRONOS_DIVERGENCE_MIN_R2` (default `0.5`). A directional but erratic gap emits nothing. The window covers only the aligned observations.
+
+**Unit change from `divergence-v1`.** `slope`, `abs_slope`, and Evidence.Score were per ordinal step. They are now gap units per hour, the same time basis as Trend. `slope_per_hour` carries that value under an explicit name (equal to `slope`). The per-step number is not preserved: it was the wrong quantity, and sampling faster must not inflate it. Consumers comparing `slope` to a per-step threshold must retune. The `detector_version` bump is the signal.
 
 - **Series**: lex-smaller entity ID.
 - **Evidence.Kind**: `pair_divergence` — one row pointing at the partner.
-- **Evidence.Score**: `|slope|`.
+- **Evidence.Score**: `|slope|` in gap units per hour (finite; not required to lie in `[0, 1]`).
 - **Signal.Metrics** / **Evidence.Metrics**:
-  - `slope` — signed OLS slope of the absolute gap (positive).
+  - `slope` — signed OLS slope of the absolute gap, gap units per hour (positive).
+  - `slope_per_hour` — same value as `slope`.
   - `abs_slope` — `|slope|`.
   - `r2` — coefficient of determination of the gap fit.
-  - `start_gap`, `end_gap` — absolute gap at the first/last aligned point.
-  - `n` — aligned observation count.
+  - `r_squared` — same value as `r2`.
+  - `start_gap`, `end_gap` — absolute gap at the first and last aligned pair in pair order.
+  - `n` — aligned pair count.
+  - `aligned_samples` — same count as `n`.
+  - `alignment_tolerance_seconds` — tolerance in force.
+- **Strength**: `clamp01(clamp01(|slope| / (2 × minSlope)) × R²)`. Shape, not sample size.
+- **Confidence**: `sampleFactor(n, 2 × minPoints) × alignmentQuality`. Not multiplied by strength. Exact alignment has quality 1; nearest-within quality falls as the mean `|Δt|` approaches the tolerance.
 
 ### Convergence — `Pattern: "convergence"`
 
-Mirror of Divergence: absolute outcome gap is shrinking (negative slope).
+Mirror of Divergence (`convergence-v2`): absolute outcome gap is shrinking. `slope` is negative and must be `≤ −CHRONOS_CONVERGENCE_MIN_SLOPE`, with `R² ≥ CHRONOS_CONVERGENCE_MIN_R2` (default `0.5`). Same unit change as Divergence: `slope` is gap units per hour, not per step.
 
 - **Series**: lex-smaller entity ID.
 - **Evidence.Kind**: `pair_convergence` — one row pointing at the partner.
-- **Evidence.Score**: `|slope|`.
+- **Evidence.Score**: `|slope|` in gap units per hour.
 - **Signal.Metrics** / **Evidence.Metrics**: same keys as Divergence (`slope` is negative).
+- **Strength / Confidence**: same formulas as Divergence, using the convergence knobs.
 
 ## Sort order
 
@@ -273,3 +296,4 @@ SSE frames use the SSE event name `signal`, an `id:` line carrying the `Signal.I
 - **Adding a new `Pattern` value** is non-breaking. Consumers using a closed switch will surface unknowns naturally.
 - **Adding a new `Evidence.Kind`** under an existing detector is reserved as a future evolution path. Consumers branching on `Kind` should default-case unknowns rather than panic.
 - **Renaming or removing** any of the strings above is a breaking change and requires an `/v2` API.
+- **Changing the unit or meaning of an existing metric value** is a breaking semantic change even when the key stays. It is recorded in `CHANGELOG.md` and signaled by a `detector_version` bump. `divergence-v2` / `convergence-v2` changed `slope` from per ordinal step to gap units per hour; `slope_per_hour` is the explicit-unit alias added in the same change.

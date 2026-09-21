@@ -10,7 +10,8 @@ Authoritative Intent and hardening priorities: [`intent.md`](intent.md).
 - **Injectable `store.Registry`** — isolated provider sets via `NewRegistry` / `Clone` / `embed.WithStoreRegistry`; package-level `Register` / `Open` still panic on duplicate schemes.
 - **Equal-timestamp total order** — Engine and peer detectors sort / pick "most recent" by `(timestamp, observation ID)`.
 - **Recurrence fail-closed on ragged / zero-norm vectors** — same rule as Anomaly.
-- **Oscillation, Divergence, Convergence** — Intent shape-catalog detectors; plateaus covered by Stall.
+- **Oscillation, Divergence, Convergence** — Intent shape-catalog detectors; plateaus covered by Stall. Divergence and Convergence slopes are gap units per hour on temporally aligned pairs; see [`temporal-semantics.md`](temporal-semantics.md).
+- **Temporal alignment** — Correlation, Cross-Scope Correlation, Divergence, and Convergence pair by timestamp (`CHRONOS_ALIGN_TOLERANCE`, default exact), not by slice index. Seasonality requires a regular cadence.
 - **Adversarial coverage** for all fourteen detectors (including Oscillation / Divergence / Convergence).
 - **gRPC transport parity** — Additive RPCs: `IngestBatch`, `StreamSignals`, `ValidateConfig`, `ExportFederation`, plus `since_cursor` / `next_cursor` on `ListSignals`. Unary `Ingest` unchanged. Schema in `api/proto/chronos/v1/chronos.proto`.
 - **Detector explainability** — all detectors populate `Signal.Explanation`.

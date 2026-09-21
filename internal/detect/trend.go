@@ -20,9 +20,12 @@ import (
 // meaningful. Strength is R² (how cleanly the data is a line);
 // Confidence is R² scaled by a sample-size factor.
 //
-// Slope units are outcome-units per hour. Irregular sampling therefore
-// changes the fitted slope relative to an ordinal-index regression
-// (trend-v1). Equal timestamps collapse the x-axis and yield no signal.
+// Slope units are outcome-units per hour. This is the reference
+// convention for every rate-like detector (Divergence and Convergence
+// use the same hours-since-anchor basis for gap units per hour).
+// Irregular sampling therefore changes the fitted slope relative to an
+// ordinal-index regression (trend-v1). Equal timestamps collapse the
+// x-axis and yield no signal. Do not regress Trend against sample index.
 //
 // Evidence: a single "regression_summary" record carrying slope, R²,
 // intercept, and n.

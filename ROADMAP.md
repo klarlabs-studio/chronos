@@ -18,7 +18,7 @@ The authoritative product Intent — principles, detector acceptance criteria, a
 - `EntityState.Validate` rejects nil observation ID, nil entity/scope, zero timestamp, non-finite features, and blank labels.
 - Adversarial numerical coverage for all fourteen detectors (`internal/detect/adversarial_test.go`).
 - Storage backend conformance suite (`internal/store/conformance`) run by memory, SQLite, libSQL, Postgres, and MySQL.
-- Temporal contract documented in [`docs/temporal-contract.md`](docs/temporal-contract.md).
+- Temporal contract documented in [`docs/temporal-contract.md`](docs/temporal-contract.md). Detector time taxonomy in [`docs/temporal-semantics.md`](docs/temporal-semantics.md): pairwise detectors align on timestamps; Divergence/Convergence slopes are per hour; Seasonality requires a regular cadence.
 
 **Storage (per [Mnemos ADR-0001](https://github.com/felixgeelhaar/Mnemos/blob/main/docs/adr/0001-multi-backend-storage.md)).**
 - `memory://` — in-process backend for tests.

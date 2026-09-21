@@ -15,14 +15,14 @@ const (
 	detectorVersionDrop                  = "drop-v2"
 	detectorVersionStall                 = "stall-v1"
 	detectorVersionAnomaly               = "anomaly-v1"
-	detectorVersionSeasonality           = "seasonality-v1"
-	detectorVersionCorrelation           = "correlation-v1"
+	detectorVersionSeasonality           = "seasonality-v2"
+	detectorVersionCorrelation           = "correlation-v2"
 	detectorVersionChangePoint           = "changepoint-v1"
 	detectorVersionOutlierCluster        = "outlier_cluster-v1"
-	detectorVersionCrossScopeCorrelation = "cross_scope_correlation-v1"
+	detectorVersionCrossScopeCorrelation = "cross_scope_correlation-v2"
 	detectorVersionOscillation           = "oscillation-v1"
-	detectorVersionDivergence            = "divergence-v1"
-	detectorVersionConvergence           = "convergence-v1"
+	detectorVersionDivergence            = "divergence-v2"
+	detectorVersionConvergence           = "convergence-v2"
 )
 
 // explainSeries builds the explainability payload for a detector that

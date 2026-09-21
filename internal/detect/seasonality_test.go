@@ -44,6 +44,13 @@ func TestSeasonality_PeriodicSeriesEmits(t *testing.T) {
 	if int(sig.Metrics["period"]) != 4 {
 		t.Errorf("period = %v, want 4", sig.Metrics["period"])
 	}
+	if sig.Metrics["period_samples"] != 4 {
+		t.Errorf("period_samples = %v, want 4", sig.Metrics["period_samples"])
+	}
+	// mkSeries stamps one point per hour, so a lag of 4 is four hours.
+	if math.Abs(sig.Metrics["period_seconds"]-4*time.Hour.Seconds()) > 1e-6 {
+		t.Errorf("period_seconds = %v, want %v", sig.Metrics["period_seconds"], 4*time.Hour.Seconds())
+	}
 	if sig.Metrics["autocorrelation"] < seasonalityCfg().SeasonalityMinAutocorr {
 		t.Errorf("autocorrelation = %f below threshold", sig.Metrics["autocorrelation"])
 	}

@@ -24,9 +24,11 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_ANOMALY_MIN_PEERS` | `2` | Anomaly | Minimum peers required for cross-entity comparison. |
 | `CHRONOS_SEASONALITY_MIN_AUTOCORR` | `0.5` | Seasonality | Minimum autocorrelation at any lag. |
 | `CHRONOS_SEASONALITY_MIN_POINTS` | `12` | Seasonality | Minimum observations to consider. |
-| `CHRONOS_SEASONALITY_MIN_PERIOD` | `2` | Seasonality | Minimum lag (period) considered. |
+| `CHRONOS_SEASONALITY_MIN_PERIOD` | `2` | Seasonality | Minimum lag (period) considered, in samples. |
+| `CHRONOS_SEASONALITY_MAX_INTERVAL_CV` | `0` | Seasonality | Maximum coefficient of variation of inter-observation intervals. `0` requires exact spacing. Above this, no seasonality signal — irregular clocks are not periods. |
+| `CHRONOS_ALIGN_TOLERANCE` | `0` | Correlation, CrossScopeCorrelation, Divergence, Convergence | Nearest-observation tolerance (Go duration). `0` requires equal timestamps. A false negative from insufficient overlap is preferred to a relationship manufactured by a wide tolerance. |
 | `CHRONOS_CORRELATION_MIN` | `0.7` | Correlation | Minimum |Pearson r| between two series to emit. |
-| `CHRONOS_CORRELATION_MIN_POINTS` | `5` | Correlation | Minimum aligned observations between two series. |
+| `CHRONOS_CORRELATION_MIN_POINTS` | `5` | Correlation | Minimum **aligned pairs** between two series. Raw length does not count. |
 | `CHRONOS_CHANGEPOINT_MIN_SHIFT` | `1.5` | ChangePoint | Minimum standardised mean shift (`|Δmean| / pooled_stddev`) to emit. |
 | `CHRONOS_CHANGEPOINT_MIN_POINTS` | `8` | ChangePoint | Minimum observations required (split needs ≥ 2 each side). |
 | `CHRONOS_CHANGEPOINT_MIN_DELTA` | `0` | ChangePoint | Minimum `|mean_before − mean_after|` in the outcome's own units, required in addition to the standardised shift. `0` (default) disables it. Use on a bounded outcome where a very stable series makes any movement score as many sigma. |
@@ -34,14 +36,16 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_OUTLIER_CLUSTER_Z` | `2.5` | OutlierCluster | Per-series \|z-score\| threshold for an observation to count as an outlier. |
 | `CHRONOS_OUTLIER_CLUSTER_WINDOW` | `5m` | OutlierCluster | Sliding-window width for "around the same time". |
 | `CHRONOS_CROSS_SCOPE_MIN` | `0.8` | CrossScopeCorrelation | Minimum \|Pearson r\| across scopes. |
-| `CHRONOS_CROSS_SCOPE_MIN_POINTS` | `5` | CrossScopeCorrelation | Minimum aligned observations between two series. |
+| `CHRONOS_CROSS_SCOPE_MIN_POINTS` | `5` | CrossScopeCorrelation | Minimum **aligned pairs** between two series in different scopes. |
 | `CHRONOS_ANONYMIZE_CROSS_SCOPE` | `false` | CrossScopeCorrelation | Replace scope/series ids with UUIDv5 hashes on cross-scope signals. |
-| `CHRONOS_OSCILLATION_MIN_FLIP_RATE` | `0.55` | Oscillation | Minimum sign-flip rate among meaningful first-differences. |
+| `CHRONOS_OSCILLATION_MIN_FLIP_RATE` | `0.55` | Oscillation | Minimum sign-flip rate among meaningful first-differences. Ordinal: timestamp spacing does not change the result. |
 | `CHRONOS_OSCILLATION_MIN_POINTS` | `6` | Oscillation | Minimum observations. |
-| `CHRONOS_DIVERGENCE_MIN_SLOPE` | `0.05` | Divergence | Minimum positive OLS slope of \|a−b\| (outcome units per aligned step). |
-| `CHRONOS_DIVERGENCE_MIN_POINTS` | `5` | Divergence | Minimum aligned observations between two series. |
-| `CHRONOS_CONVERGENCE_MIN_SLOPE` | `0.05` | Convergence | Minimum \|negative\| OLS slope of \|a−b\|. |
-| `CHRONOS_CONVERGENCE_MIN_POINTS` | `5` | Convergence | Minimum aligned observations between two series. |
+| `CHRONOS_DIVERGENCE_MIN_SLOPE` | `0.05` | Divergence | Minimum positive OLS slope of \|a−b\| in **gap units per hour**. |
+| `CHRONOS_DIVERGENCE_MIN_POINTS` | `5` | Divergence | Minimum aligned pairs between two series. |
+| `CHRONOS_DIVERGENCE_MIN_R2` | `0.5` | Divergence | Minimum R² of the gap regression. A directional but erratic gap is not divergence. `0` disables the fit gate. Not the same floor as Trend. |
+| `CHRONOS_CONVERGENCE_MIN_SLOPE` | `0.05` | Convergence | Minimum \|negative\| OLS slope of \|a−b\| in gap units per hour. |
+| `CHRONOS_CONVERGENCE_MIN_POINTS` | `5` | Convergence | Minimum aligned pairs between two series. |
+| `CHRONOS_CONVERGENCE_MIN_R2` | `0.5` | Convergence | Minimum R² of the gap regression. `0` disables the fit gate. |
 | `CHRONOS_CONFIDENCE_ESTABLISHED` | `2.0` | all detectors | MIN_POINTS multiplier for `confidence_class=established`. |
 | `CHRONOS_CONFIDENCE_STRONG` | `5.0` | all detectors | MIN_POINTS multiplier for `confidence_class=strong`. |
 | `CHRONOS_DETECTOR_PARALLELISM` | `false` | Engine | Run per-scope detectors in parallel goroutines. Off by default (deterministic ordering); flip on for many-scope deployments. |
@@ -74,8 +78,8 @@ Each detector has its own knob namespace (`CHRONOS_<DETECTOR>_*`) so you can tun
 - **Recurrence** (`SIM_THRESHOLD`, `MIN_SAMPLE`) — raise threshold for fewer, more specific peers; lower it for more candidates. Below ~0.7 admits noise. `MIN_SAMPLE` of 2 is the smallest defensible value; five is the saturation point of the confidence sample-factor.
 - **Trend / Spike / Drop / Stall** thresholds influence trigger sensitivity; smaller windows react faster but produce more noise.
 - **Anomaly** (`MAX_SIM`, `MIN_PEERS`) — lower `MAX_SIM` makes anomalies harder to qualify (only truly isolated entities trigger); higher `MIN_PEERS` requires more cohort coverage.
-- **Seasonality** (`MIN_AUTOCORR`, `MIN_POINTS`, `MIN_PERIOD`) — `MIN_POINTS` should be at least two full periods; raising `MIN_PERIOD` past 2 avoids labelling noisy near-flat series as periodic.
-- **Correlation** (`MIN`, `MIN_POINTS`) — pairwise correlation cost is O(N²) in series count per scope. Tighten `MIN` and `MIN_POINTS` for noisy data.
+- **Seasonality** (`MIN_AUTOCORR`, `MIN_POINTS`, `MIN_PERIOD`, `MAX_INTERVAL_CV`) — `MIN_POINTS` should be at least two full periods; raising `MIN_PERIOD` past 2 avoids labelling noisy near-flat series as periodic. `MAX_INTERVAL_CV` of `0` refuses any uneven cadence. Raise it only when you have decided how much clock jitter still counts as one period.
+- **Correlation** (`MIN`, `MIN_POINTS`, `ALIGN_TOLERANCE`) — pairwise cost is O(N²) in series count per scope. `MIN_POINTS` counts aligned pairs. Leave `ALIGN_TOLERANCE` at `0` unless two series are known to share a clock within a bounded skew.
 
 ## Backend choice
 

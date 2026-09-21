@@ -18,10 +18,13 @@ import (
 // detector misses these by design — it groups by scope. This detector
 // runs once across the full state list as a CrossScopeDetector.
 //
-// Method: align observations by ordinal index (mirroring the
-// within-scope detector's assumption that adapters with similar
-// cadence are comparable). Pearson correlation gated on
-// CHRONOS_CROSS_SCOPE_MIN and CHRONOS_CROSS_SCOPE_MIN_POINTS.
+// Method: temporally align observations ([AlignNearest], tolerance
+// CHRONOS_ALIGN_TOLERANCE) and compute Pearson r on the aligned
+// outcomes. Same contract as within-scope Correlation — a different
+// scope does not relax the requirement that the observations were
+// contemporaneous. Minimum sample size counts aligned pairs. The
+// signal window spans only those pairs, not the union of the two
+// histories.
 //
 // Cost is O(N²) in series count *globally*, so the threshold is
 // stricter than the within-scope default (0.8 vs 0.7) to keep noise
@@ -86,28 +89,35 @@ func (c *CrossScopeCorrelation) CrossDetect(_ context.Context, states []chronos.
 			if a.scope == b.scope {
 				continue // within-scope correlation handles this
 			}
-			ya := outcomes(groups[a])
-			yb := outcomes(groups[b])
-			n := minInt(len(ya), len(yb))
+			pairs := AlignNearest(groups[a], groups[b], c.cfg.AlignTolerance)
+			n := len(pairs)
 			if n < c.cfg.CrossScopeMinPoints {
 				continue
 			}
-			ya, yb = ya[len(ya)-n:], yb[len(yb)-n:]
+			ya := make([]float64, n)
+			yb := make([]float64, n)
+			alignedA := make([]chronos.EntityState, n)
+			for k, p := range pairs {
+				ya[k] = p.A.Outcome()
+				yb[k] = p.B.Outcome()
+				alignedA[k] = p.A
+			}
 			r := pearsonCorrelation(ya, yb)
-			if math.IsNaN(r) {
+			if math.IsNaN(r) || !isFinite(r) {
 				continue
 			}
 			absR := math.Abs(r)
 			if absR < c.cfg.CrossScopeMin {
 				continue
 			}
-			signals = append(signals, c.build(a, b, r, n, groups[a], groups[b]))
+			signals = append(signals, c.build(a, b, r, pairs, alignedA))
 		}
 	}
 	return keepValid(signals)
 }
 
-func (c *CrossScopeCorrelation) build(a, b scopedSeriesKey, r float64, n int, sa, sb []chronos.EntityState) domain.Signal {
+func (c *CrossScopeCorrelation) build(a, b scopedSeriesKey, r float64, pairs []AlignedPair, alignedA []chronos.EntityState) domain.Signal {
+	n := len(pairs)
 	absR := math.Abs(r)
 	direction := 0.0
 	if r > 0 {
@@ -115,14 +125,15 @@ func (c *CrossScopeCorrelation) build(a, b scopedSeriesKey, r float64, n int, sa
 	} else if r < 0 {
 		direction = -1
 	}
+	start, end := alignedWindow(pairs)
 	metrics := map[string]float64{
-		"r":         r,
-		"abs_r":     absR,
-		"n":         float64(n),
-		"direction": direction,
+		"r":                           r,
+		"abs_r":                       absR,
+		"n":                           float64(n),
+		"aligned_samples":             float64(n),
+		"alignment_tolerance_seconds": c.cfg.AlignTolerance.Seconds(),
+		"direction":                   direction,
 	}
-	earliest := earliestTime(sa[0].Timestamp, sb[0].Timestamp)
-	latest := latestTime(sa[len(sa)-1].Timestamp, sb[len(sb)-1].Timestamp)
 
 	// The lex-smaller (scope, series) tuple owns the signal; the
 	// other half rides in evidence. Anonymization replaces both
@@ -142,39 +153,24 @@ func (c *CrossScopeCorrelation) build(a, b scopedSeriesKey, r float64, n int, sa
 		Series:          emittedSeries,
 		Pattern:         domain.PatternTypeCrossScopeCorrelation,
 		DetectedAt:      c.now(),
-		Window:          domain.TimeWindow{Start: earliest, End: latest},
+		Window:          domain.TimeWindow{Start: start, End: end},
 		Strength:        absR,
 		Confidence:      clamp01(absR * sampleFactor(n, 2*c.cfg.CrossScopeMinPoints)),
 		ConfidenceClass: ClassifyConfidence(n, c.cfg.CrossScopeMinPoints, c.cfg),
 		Metrics:         metrics,
-		Explanation:     explainSeries(sa[max(0, len(sa)-n):], 1, c.cfg.CrossScopeMin, detectorVersionCrossScopeCorrelation),
+		Explanation:     explainSeries(alignedA, 1, c.cfg.CrossScopeMin, detectorVersionCrossScopeCorrelation),
 		Evidence: []domain.Evidence{{
-			Series:  emittedPartner,
-			Time:    latest,
-			Kind:    "cross_scope_pair",
-			Score:   absR,
-			Metrics: map[string]float64{"partner_scope_id_lex_max": 1, "r": r, "n": float64(n)},
+			Series: emittedPartner,
+			Time:   end,
+			Kind:   "cross_scope_pair",
+			Score:  absR,
+			Metrics: map[string]float64{
+				"partner_scope_id_lex_max":    1,
+				"r":                           r,
+				"n":                           float64(n),
+				"aligned_samples":             float64(n),
+				"alignment_tolerance_seconds": c.cfg.AlignTolerance.Seconds(),
+			},
 		}},
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func earliestTime(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return a
-	}
-	return b
-}
-
-func latestTime(a, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
 }

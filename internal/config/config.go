@@ -56,14 +56,20 @@ type Config struct {
 	AnomalyMaxSimilarity float64 // Max similarity to nearest peer to count as anomalous
 	AnomalyMinPeers      int     // Minimum peers required for cross-entity comparison
 
-	// Detection — Seasonality (autocorrelation)
-	SeasonalityMinAutocorr float64 // Minimum autocorrelation at any lag to emit
-	SeasonalityMinPoints   int     // Minimum observations to consider seasonality
-	SeasonalityMinPeriod   int     // Minimum lag (period) to consider
+	// Detection — Seasonality (autocorrelation on a regular cadence)
+	SeasonalityMinAutocorr   float64 // Minimum autocorrelation at any lag to emit
+	SeasonalityMinPoints     int     // Minimum observations to consider seasonality
+	SeasonalityMinPeriod     int     // Minimum lag (period) to consider
+	SeasonalityMaxIntervalCV float64 // Max coefficient of variation of inter-observation intervals; 0 = exact spacing
 
-	// Detection — Correlation (cross-series Pearson)
+	// Detection — temporal alignment shared by pairwise detectors
+	// (Correlation, CrossScopeCorrelation, Divergence, Convergence).
+	// 0 requires exact timestamp equality. Nearest-within is opt-in.
+	AlignTolerance time.Duration
+
+	// Detection — Correlation (cross-series Pearson on aligned pairs)
 	CorrelationMin       float64 // Minimum |Pearson r| to emit
-	CorrelationMinPoints int     // Minimum aligned observations between two series
+	CorrelationMinPoints int     // Minimum aligned pairs between two series
 
 	// Detection — ChangePoint (best-split mean-shift)
 	ChangePointMinShift  float64 // Minimum |Δmean / pooled_stddev| to emit
@@ -92,11 +98,13 @@ type Config struct {
 	OscillationMinFlipRate float64 // Minimum flip rate in [0, 1] to emit
 	OscillationMinPoints   int     // Minimum observations
 
-	// Detection — Divergence / Convergence (OLS slope of |a−b|)
-	DivergenceMinSlope   float64 // Minimum positive gap slope (outcome units per step)
-	DivergenceMinPoints  int     // Minimum aligned observations
-	ConvergenceMinSlope  float64 // Minimum |negative| gap slope to emit
-	ConvergenceMinPoints int     // Minimum aligned observations
+	// Detection — Divergence / Convergence (OLS slope of |a−b| in gap units per hour)
+	DivergenceMinSlope   float64 // Minimum positive gap slope (gap units per hour)
+	DivergenceMinPoints  int     // Minimum aligned pairs
+	DivergenceMinR2      float64 // Minimum R² of the gap regression
+	ConvergenceMinSlope  float64 // Minimum |negative| gap slope (gap units per hour)
+	ConvergenceMinPoints int     // Minimum aligned pairs
+	ConvergenceMinR2     float64 // Minimum R² of the gap regression
 
 	// ConfidenceClassEstablished is the MIN_POINTS multiplier that a
 	// signal's supporting sample size must clear to be labelled
@@ -235,9 +243,12 @@ func Default() *Config {
 		AnomalyMaxSimilarity: defaultEnvFloat64("CHRONOS_ANOMALY_MAX_SIM", 0.5),
 		AnomalyMinPeers:      defaultEnvInt("CHRONOS_ANOMALY_MIN_PEERS", 2),
 
-		SeasonalityMinAutocorr: defaultEnvFloat64("CHRONOS_SEASONALITY_MIN_AUTOCORR", 0.5),
-		SeasonalityMinPoints:   defaultEnvInt("CHRONOS_SEASONALITY_MIN_POINTS", 12),
-		SeasonalityMinPeriod:   defaultEnvInt("CHRONOS_SEASONALITY_MIN_PERIOD", 2),
+		SeasonalityMinAutocorr:   defaultEnvFloat64("CHRONOS_SEASONALITY_MIN_AUTOCORR", 0.5),
+		SeasonalityMinPoints:     defaultEnvInt("CHRONOS_SEASONALITY_MIN_POINTS", 12),
+		SeasonalityMinPeriod:     defaultEnvInt("CHRONOS_SEASONALITY_MIN_PERIOD", 2),
+		SeasonalityMaxIntervalCV: defaultEnvFloat64("CHRONOS_SEASONALITY_MAX_INTERVAL_CV", 0),
+
+		AlignTolerance: defaultEnvDuration("CHRONOS_ALIGN_TOLERANCE", 0),
 
 		CorrelationMin:       defaultEnvFloat64("CHRONOS_CORRELATION_MIN", 0.7),
 		CorrelationMinPoints: defaultEnvInt("CHRONOS_CORRELATION_MIN_POINTS", 5),
@@ -259,8 +270,10 @@ func Default() *Config {
 
 		DivergenceMinSlope:   defaultEnvFloat64("CHRONOS_DIVERGENCE_MIN_SLOPE", 0.05),
 		DivergenceMinPoints:  defaultEnvInt("CHRONOS_DIVERGENCE_MIN_POINTS", 5),
+		DivergenceMinR2:      defaultEnvFloat64("CHRONOS_DIVERGENCE_MIN_R2", 0.5),
 		ConvergenceMinSlope:  defaultEnvFloat64("CHRONOS_CONVERGENCE_MIN_SLOPE", 0.05),
 		ConvergenceMinPoints: defaultEnvInt("CHRONOS_CONVERGENCE_MIN_POINTS", 5),
+		ConvergenceMinR2:     defaultEnvFloat64("CHRONOS_CONVERGENCE_MIN_R2", 0.5),
 
 		ConfidenceClassEstablished: defaultEnvFloat64("CHRONOS_CONFIDENCE_ESTABLISHED", 2.0),
 		ConfidenceClassStrong:      defaultEnvFloat64("CHRONOS_CONFIDENCE_STRONG", 5.0),
@@ -322,6 +335,12 @@ func (c *Config) Validate() error {
 	if c.SeasonalityMinAutocorr < -1 || c.SeasonalityMinAutocorr > 1 {
 		return fmt.Errorf("seasonality min autocorrelation must be in [-1, 1], got %f", c.SeasonalityMinAutocorr)
 	}
+	if c.SeasonalityMaxIntervalCV < 0 {
+		return fmt.Errorf("seasonality max interval cv must be >= 0, got %f", c.SeasonalityMaxIntervalCV)
+	}
+	if c.AlignTolerance < 0 {
+		return fmt.Errorf("align tolerance must be >= 0, got %s", c.AlignTolerance)
+	}
 	if c.CorrelationMin < 0 || c.CorrelationMin > 1 {
 		return fmt.Errorf("correlation min must be in [0, 1], got %f", c.CorrelationMin)
 	}
@@ -356,11 +375,17 @@ func (c *Config) Validate() error {
 	if c.DivergenceMinPoints < 3 {
 		return fmt.Errorf("divergence min points must be at least 3, got %d", c.DivergenceMinPoints)
 	}
+	if c.DivergenceMinR2 < 0 || c.DivergenceMinR2 > 1 {
+		return fmt.Errorf("divergence min r2 must be in [0, 1], got %f", c.DivergenceMinR2)
+	}
 	if c.ConvergenceMinSlope < 0 {
 		return fmt.Errorf("convergence min slope must be >= 0, got %f", c.ConvergenceMinSlope)
 	}
 	if c.ConvergenceMinPoints < 3 {
 		return fmt.Errorf("convergence min points must be at least 3, got %d", c.ConvergenceMinPoints)
+	}
+	if c.ConvergenceMinR2 < 0 || c.ConvergenceMinR2 > 1 {
+		return fmt.Errorf("convergence min r2 must be in [0, 1], got %f", c.ConvergenceMinR2)
 	}
 	if c.ConfidenceClassEstablished < 0 {
 		return fmt.Errorf("confidence established multiplier must be >= 0, got %f", c.ConfidenceClassEstablished)

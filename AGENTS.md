@@ -74,6 +74,7 @@ make sqlc       # regenerate internal/store/sqlite/sqlcgen
 4. Add per-detector config knobs in `internal/config/config.go` (`CHRONOS_<DETECTOR>_*`).
 5. Document the detector's evidence shape (the `Kind` value and `Metrics` keys) in [`docs/wire-contract.md`](docs/wire-contract.md).
 6. Add unit tests covering the trigger and the no-trigger paths.
+7. If the pattern compares series, estimates a rate, or claims a period, follow [`docs/temporal-semantics.md`](docs/temporal-semantics.md). Slice position is not a timestamp.
 
 ## Adding an adapter
 
