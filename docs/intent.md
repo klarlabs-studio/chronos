@@ -349,6 +349,7 @@ Before significantly expanding Chronos’s detector catalog, prioritize hardenin
 | **P0** | Input invariants — `EntityState` validation; observation IDs; timestamps; finite numerics; malformed feature sets | Done |
 | **P1** | Numerical robustness — adversarial coverage; resolve correctness findings (ChangePoint Inf, Anomaly zero-vec, OutlierCluster denormal, two-point correlation) | Done |
 | **P1** | Temporal contract — deterministic ordering and duplicate semantics | Done ([`temporal-contract.md`](temporal-contract.md) + embed OOO integration test) |
+| **P1** | Temporal semantics — shared alignment; wall-clock gap slopes; seasonality cadence gate | Done ([`temporal-semantics.md`](temporal-semantics.md)) |
 | **P1** | Storage conformance — reusable backend contract suite on every backend | Done (`internal/store/conformance`) |
 | **P2** | Contract consistency — terminology and documentation drift | Done for Intent adoption; ongoing maintenance |
 | **P2** | Embeddability — injectable `chronos.Registry`; injectable `store.Registry` (+ `embed.WithStoreRegistry`); `cmd/chronos compute` dogfoods `embed` | Done |

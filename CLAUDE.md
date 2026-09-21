@@ -102,9 +102,11 @@ All env-var driven. Defaults in `config.Default()` (`internal/config/config.go`)
 | `CHRONOS_ANOMALY_MIN_PEERS` | `2` | Anomaly: minimum peers for cross-entity comparison |
 | `CHRONOS_SEASONALITY_MIN_AUTOCORR` | `0.5` | Seasonality: minimum autocorrelation at any lag |
 | `CHRONOS_SEASONALITY_MIN_POINTS` | `12` | Seasonality: minimum observations |
-| `CHRONOS_SEASONALITY_MIN_PERIOD` | `2` | Seasonality: minimum lag (period) considered |
+| `CHRONOS_SEASONALITY_MIN_PERIOD` | `2` | Seasonality: minimum lag (period) considered, in samples |
+| `CHRONOS_SEASONALITY_MAX_INTERVAL_CV` | `0` | Seasonality: max CV of inter-observation intervals; `0` = exact spacing |
+| `CHRONOS_ALIGN_TOLERANCE` | `0` | Pairwise alignment tolerance; `0` = exact timestamps |
 | `CHRONOS_CORRELATION_MIN` | `0.7` | Correlation: minimum |Pearson r| to emit |
-| `CHRONOS_CORRELATION_MIN_POINTS` | `5` | Correlation: minimum aligned observations |
+| `CHRONOS_CORRELATION_MIN_POINTS` | `5` | Correlation: minimum aligned pairs |
 | `CHRONOS_CHANGEPOINT_MIN_SHIFT` | `1.5` | ChangePoint: minimum standardised mean shift |
 | `CHRONOS_CHANGEPOINT_MIN_POINTS` | `8` | ChangePoint: minimum observations |
 | `CHRONOS_OUTLIER_CLUSTER_MIN_SERIES` | `3` | OutlierCluster: minimum distinct series in a bucket |
@@ -115,10 +117,12 @@ All env-var driven. Defaults in `config.Default()` (`internal/config/config.go`)
 | `CHRONOS_ANONYMIZE_CROSS_SCOPE` | `false` | Hash scope/series ids on cross-scope signals |
 | `CHRONOS_OSCILLATION_MIN_FLIP_RATE` | `0.55` | Oscillation: minimum sign-flip rate |
 | `CHRONOS_OSCILLATION_MIN_POINTS` | `6` | Oscillation: minimum observations |
-| `CHRONOS_DIVERGENCE_MIN_SLOPE` | `0.05` | Divergence: minimum positive \|a−b\| slope per step |
-| `CHRONOS_DIVERGENCE_MIN_POINTS` | `5` | Divergence: minimum aligned observations |
-| `CHRONOS_CONVERGENCE_MIN_SLOPE` | `0.05` | Convergence: minimum \|negative\| \|a−b\| slope |
-| `CHRONOS_CONVERGENCE_MIN_POINTS` | `5` | Convergence: minimum aligned observations |
+| `CHRONOS_DIVERGENCE_MIN_SLOPE` | `0.05` | Divergence: minimum positive \|a−b\| slope, gap units per hour |
+| `CHRONOS_DIVERGENCE_MIN_POINTS` | `5` | Divergence: minimum aligned pairs |
+| `CHRONOS_DIVERGENCE_MIN_R2` | `0.5` | Divergence: minimum R² of the gap regression |
+| `CHRONOS_CONVERGENCE_MIN_SLOPE` | `0.05` | Convergence: minimum \|negative\| \|a−b\| slope, gap units per hour |
+| `CHRONOS_CONVERGENCE_MIN_POINTS` | `5` | Convergence: minimum aligned pairs |
+| `CHRONOS_CONVERGENCE_MIN_R2` | `0.5` | Convergence: minimum R² of the gap regression |
 | `CHRONOS_CONFIDENCE_ESTABLISHED` | `2.0` | MIN_POINTS multiplier for `established` |
 | `CHRONOS_CONFIDENCE_STRONG` | `5.0` | MIN_POINTS multiplier for `strong` |
 | `CHRONOS_DETECTOR_PARALLELISM` | `false` | Parallel per-scope detectors |
@@ -139,6 +143,7 @@ All env-var driven. Defaults in `config.Default()` (`internal/config/config.go`)
 4. Add config knobs to `internal/config/config.go`.
 5. Document evidence `Kind` and `Metrics` keys in [`docs/wire-contract.md`](docs/wire-contract.md).
 6. Tests in `internal/detect/<pattern>_test.go` covering trigger + no-trigger.
+7. If the pattern compares series, estimates a rate, or claims a period, follow [`docs/temporal-semantics.md`](docs/temporal-semantics.md). Slice position is not a timestamp.
 
 ## Conventions
 

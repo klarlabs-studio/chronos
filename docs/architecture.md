@@ -6,7 +6,7 @@ This document describes the engine's layout, the contracts at each boundary, and
 
 Chronos is the **Time / Pattern Perception** layer of the cognitive stack. It accepts time-series observations from any domain via an adapter, runs them through a fan-out of detectors, and emits structured signals.
 
-The full Intent — principles, detector acceptance criteria, hardening priorities, and non-goals — lives in [`intent.md`](intent.md). Temporal ordering and duplicate semantics are in [`temporal-contract.md`](temporal-contract.md).
+The full Intent — principles, detector acceptance criteria, hardening priorities, and non-goals — lives in [`intent.md`](intent.md). Temporal ordering and duplicate semantics are in [`temporal-contract.md`](temporal-contract.md). Which detectors may use slice position, and which must use the clock, is in [`temporal-semantics.md`](temporal-semantics.md).
 
 Two design rules everything else follows:
 
@@ -119,17 +119,19 @@ The Engine groups input states by scope, sorts each group ascending by timestamp
 
 ### Other available detectors
 
-- `Trend` — OLS linear regression on outcome vs wall-clock hours since window start (`trend-v2`). Trigger: `|slope| > TrendMinSlope ∧ R² > 0.3 ∧ n >= TrendMinPoints`. Strength = R²; metrics carry slope (outcome units / hour), intercept, R², n. Evidence kind `regression_summary`.
+- `Trend` — OLS linear regression on outcome vs wall-clock hours since window start (`trend-v2`). Trigger: `|slope| > TrendMinSlope ∧ R² > 0.3 ∧ n >= TrendMinPoints`. Strength = R²; metrics carry slope (outcome units / hour), intercept, R², n. Evidence kind `regression_summary`. This hours-since-anchor basis is what Divergence and Convergence use for gap slope.
 - `Spike` / `Drop` — z-score of the most recent outcome against the previous `SpikeWindow` points. Trigger: `|z| >= threshold` in the configured direction. Strength = `min(|z|/5, 1)`. Confidence is derived from the evidence rather than the magnitude: `support × quietness × margin`, where support is `min(n / (CONFIDENCE_STRONG × (SpikeWindow+1)), 1)`, quietness is `1 − ½·stddev/(|mean| + stddev)`, and margin ramps from `½` at the trigger threshold to `1` once `|z|` is 25% past it. Support saturates exactly where `ConfidenceClass` says `strong`, so the number and the class cannot contradict each other. Metrics carry z, baseline mean/stddev. Evidence kind `baseline_deviation`.
 - `Stall` — normalised stddev of outcomes below `StallMaxStdDev` over at least `StallMinPoints`. Strength reflects flatness (1 - normalised_stddev / threshold). Evidence kind `variance_window`.
 - `Anomaly` — the cross-entity dual of Recurrence. For each entity's most recent state, cosine-compare to peers' most recent states; emit when the *highest* peer similarity is below `AnomalyMaxSimilarity` (subject is isolated). Strength = `1 - max_similarity`. Evidence kind `peer_distance`, one per peer. Window is degenerate: `Start == End == subject.Timestamp`, since Anomaly is a snapshot in time across peers rather than an interval. Consumers computing window duration must special-case this pattern.
-- `Seasonality` — autocorrelation peaks. Computes Pearson autocorrelation at lags `[MinPeriod, n/2]` and emits when the largest peak exceeds `SeasonalityMinAutocorr`. Strength = the peak value; metrics carry the period (lag). Evidence kind `autocorrelation_peak`.
-- `Correlation` — pairwise Pearson on aligned outcome series within a scope. One signal per pair, deterministically owned by the lex-smaller series ID; the other appears as evidence. Strength = `|r|`; metrics carry r, direction (+1/0/-1). Evidence kind `pair_correlation`. Cost is O(N²) in series count per scope.
+- `Seasonality` — autocorrelation peaks, only when inter-observation spacing is regular (`seasonality-v2`, `CHRONOS_SEASONALITY_MAX_INTERVAL_CV`, default exact). Evidence carries `period` in samples and `period_seconds`. Evidence kind `autocorrelation_peak`.
+- `Correlation` — pairwise Pearson on **temporally aligned** outcomes within a scope (`correlation-v2`). Slice index is not a pair. One signal per pair, owned by the lex-smaller series ID. Strength = `|r|`. The window is the aligned overlap. Evidence kind `pair_correlation`.
 - `ChangePoint` — best-split mean-shift. Distinct from Spike/Drop (short-lived deviations). Emits `regime_before` / `regime_after` evidence and `shift` / `delta_mean` metrics.
 - `OutlierCluster` — cohort-level: several series in the same scope go anomalous in the same time bucket. `Series` is `uuid.Nil` by contract; members live in evidence (`outlier_member`).
-- `CrossScopeCorrelation` — pairwise Pearson across (scope, series) pairs in *different* scopes. Implements `CrossScopeDetector`; the engine runs it once after per-scope detectors. Optional anonymize mode replaces scope/series ids with UUIDv5 hashes.
+- `CrossScopeCorrelation` — same alignment and Pearson contract as Correlation, across different scopes (`cross_scope_correlation-v2`). Implements `CrossScopeDetector`. Optional anonymize mode replaces scope/series ids with UUIDv5 hashes.
+- `Oscillation` — ordinal sign-flip rate. Cadence does not change the result (`oscillation-v1`). Not a frequency.
+- `Divergence` / `Convergence` — `|A−B|` on aligned pairs, OLS against hours since the first pair (`divergence-v2` / `convergence-v2`). Slope is gap units per hour. Both a minimum |slope| and a minimum R² (default 0.5) are required. Strength is shape; confidence is sample size and alignment tightness.
 
-Each detector defines its own `Evidence.Kind` and `Metrics` keys; the schema is uniform but the semantics are detector-specific. The full list of stable string keys consumers may rely on is in [`wire-contract.md`](wire-contract.md).
+The ordinal / rate / relational / periodic split is in [`temporal-semantics.md`](temporal-semantics.md). Each detector defines its own `Evidence.Kind` and `Metrics` keys; the schema is uniform but the semantics are detector-specific. The full list of stable string keys consumers may rely on is in [`wire-contract.md`](wire-contract.md).
 
 ## Persistence
 

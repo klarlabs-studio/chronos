@@ -14,11 +14,14 @@ import (
 
 // Correlation detects PatternTypeCorrelation: two series in the same
 // scope whose outcome metrics move together (positive r) or opposite
-// (negative r). Pearson correlation is computed on the last
-// min(len(a), len(b)) outcomes of each series — the alignment is by
-// ordinal index, so this assumes both series share roughly the same
-// observation cadence. Adapters that ingest at very different
-// cadences will produce noisy correlations.
+// (negative r). Pearson correlation is computed only on temporally
+// aligned pairs ([AlignNearest], tolerance CHRONOS_ALIGN_TOLERANCE).
+// Slice position is not evidence. A morning series and an afternoon
+// series with the same values produce no signal when no timestamps
+// fall within tolerance.
+//
+// Minimum sample size counts aligned pairs, not raw observations.
+// The signal window spans only the observations that entered a pair.
 //
 // One signal is emitted per pair, with Series being the
 // lexicographically smaller of the two entity IDs (so signals are
@@ -72,15 +75,19 @@ func (c *Correlation) Detect(_ context.Context, scopeID uuid.UUID, states []chro
 }
 
 func (c *Correlation) pair(scopeID, idA, idB uuid.UUID, a, b []chronos.EntityState) (domain.Signal, bool) {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
+	pairs := AlignNearest(a, b, c.cfg.AlignTolerance)
+	n := len(pairs)
 	if n < c.cfg.CorrelationMinPoints {
 		return domain.Signal{}, false
 	}
-	xs := outcomes(a[len(a)-n:])
-	ys := outcomes(b[len(b)-n:])
+	xs := make([]float64, n)
+	ys := make([]float64, n)
+	alignedA := make([]chronos.EntityState, n)
+	for i, p := range pairs {
+		xs[i] = p.A.Outcome()
+		ys[i] = p.B.Outcome()
+		alignedA[i] = p.A
+	}
 	r := pearsonCorrelation(xs, ys)
 	if math.Abs(r) < c.cfg.CorrelationMin {
 		return domain.Signal{}, false
@@ -88,27 +95,15 @@ func (c *Correlation) pair(scopeID, idA, idB uuid.UUID, a, b []chronos.EntitySta
 
 	strength := clamp01(math.Abs(r))
 	confidence := strength * sampleFactor(n, 2*c.cfg.CorrelationMinPoints)
-
-	// Window covers the overlap interval — earliest of the two starts
-	// to latest of the two ends.
-	startA := a[len(a)-n].Timestamp
-	startB := b[len(b)-n].Timestamp
-	start := startA
-	if startB.Before(startA) {
-		start = startB
-	}
-	endA := a[len(a)-1].Timestamp
-	endB := b[len(b)-1].Timestamp
-	end := endA
-	if endB.After(endA) {
-		end = endB
-	}
+	start, end := alignedWindow(pairs)
 
 	metrics := map[string]float64{
-		"r":         r,
-		"abs_r":     math.Abs(r),
-		"n":         float64(n),
-		"direction": directionOf(r),
+		"r":                           r,
+		"abs_r":                       math.Abs(r),
+		"n":                           float64(n),
+		"aligned_samples":             float64(n),
+		"alignment_tolerance_seconds": c.cfg.AlignTolerance.Seconds(),
+		"direction":                   directionOf(r),
 	}
 
 	return domain.Signal{
@@ -122,7 +117,7 @@ func (c *Correlation) pair(scopeID, idA, idB uuid.UUID, a, b []chronos.EntitySta
 		Confidence:      confidence,
 		ConfidenceClass: ClassifyConfidence(n, c.cfg.CorrelationMinPoints, c.cfg),
 		Metrics:         metrics,
-		Explanation:     explainSeries(a[len(a)-n:], 1, c.cfg.CorrelationMin, detectorVersionCorrelation),
+		Explanation:     explainSeries(alignedA, 1, c.cfg.CorrelationMin, detectorVersionCorrelation),
 		Evidence: []domain.Evidence{{
 			Series:  idB,
 			Time:    end,

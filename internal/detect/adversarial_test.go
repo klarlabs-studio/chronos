@@ -24,8 +24,8 @@ import (
 // Confidence are real numbers in [0, 1] and which satisfies
 // domain.Signal.Validate — the guarantee the Detector interface makes
 // to the engine. Remaining TestFinding_* cases document deliberate
-// product choices (ordinal Trend, ChangePointMinDelta default 0,
-// detector precondition on chronological input) rather than bugs.
+// product choices (ChangePoint and Stall can both fire on one series;
+// detectors require chronological input) rather than bugs.
 //
 // Inputs are assumed finite: NaN/Inf rejection at the EntityState
 // boundary is covered separately. Every fixture carries a non-zero
@@ -78,10 +78,14 @@ func advCfg() *config.Config {
 		CrossScopeMinPoints:        5,
 		OscillationMinFlipRate:     0.55,
 		OscillationMinPoints:       6,
+		SeasonalityMaxIntervalCV:   0,
+		AlignTolerance:             0,
 		DivergenceMinSlope:         0.05,
 		DivergenceMinPoints:        5,
+		DivergenceMinR2:            0.5,
 		ConvergenceMinSlope:        0.05,
 		ConvergenceMinPoints:       5,
+		ConvergenceMinR2:           0.5,
 		ConfidenceClassEstablished: 2.0,
 		ConfidenceClassStrong:      5.0,
 	}
@@ -555,8 +559,8 @@ func TestCorrelation_Adversarial(t *testing.T) {
 			"two identically shaped series at an unrepresentable magnitude"},
 		{"both denormal ramps", []float64{advDenormal, 2 * advDenormal, 3 * advDenormal, 4 * advDenormal, 5 * advDenormal, 6 * advDenormal, 7 * advDenormal, 8 * advDenormal}, []float64{advDenormal, 2 * advDenormal, 3 * advDenormal, 4 * advDenormal, 5 * advDenormal, 6 * advDenormal, 7 * advDenormal, 8 * advDenormal}, 0,
 			"subnormal products underflow to zero variance"},
-		{"unequal lengths align on the tail", advRamp(20, 1, 1), advRamp(5, 1, 1), 1,
-			"alignment is by ordinal index over the shorter series"},
+		{"unequal lengths share a timestamp prefix", advRamp(20, 1, 1), advRamp(5, 1, 1), 1,
+			"exact alignment keeps the five shared timestamps, not a tail slice"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -625,7 +629,7 @@ func TestDivergence_Adversarial(t *testing.T) {
 		{"parallel ramps", advRamp(8, 1, 1), advRamp(8, 2, 1), 0,
 			"constant gap of 1 → slope 0"},
 		{"growing gap", advConst(0, 8), advRamp(8, 1, 1), 1,
-			"flat vs rising: |a−b| grows by 1 per step"},
+			"flat vs rising: |a−b| grows by 1 per minute, 60 gap units per hour"},
 		{"one below minimum", advConst(0, 4), advRamp(4, 1, 1), 0,
 			"DivergenceMinPoints is 5"},
 		{"exactly at minimum", advConst(0, 5), advRamp(5, 1, 1), 1,
@@ -683,19 +687,37 @@ func TestConvergence_Adversarial(t *testing.T) {
 }
 
 func TestCorrelation_DuplicateTimestampsKeepWindowValid(t *testing.T) {
-	// Two series whose observations all share one instant: the
-	// overlap window collapses to a point, which must still satisfy
-	// TimeWindow.Validate (End not before Start).
+	// Two series whose observations all share one instant: every
+	// timestamp matches, so exact alignment still pairs them. IDs are
+	// assigned in value order so the tie-break zips the ramps (equal
+	// distances prefer the smaller observation ID). The overlap window
+	// collapses to a point, which must still satisfy TimeWindow.Validate.
 	scope := uuid.New()
 	d := NewCorrelation(advCfg())
 	ea, eb := uuid.New(), uuid.New()
-	states := append(advSeries(scope, ea, 0, advRamp(8, 1, 1)), advSeries(scope, eb, 0, advRamp(8, 1, 1))...)
+	ys := advRamp(8, 1, 1)
+	var states []chronos.EntityState
+	for i, y := range ys {
+		states = append(states,
+			chronos.EntityState{
+				ID:       uuid.MustParse("00000000-0000-0000-0000-" + sprintf12(i+1)),
+				EntityID: ea, ScopeID: scope, Timestamp: advBase, Features: []float64{y},
+			},
+			chronos.EntityState{
+				ID:       uuid.MustParse("10000000-0000-0000-0000-" + sprintf12(i+1)),
+				EntityID: eb, ScopeID: scope, Timestamp: advBase, Features: []float64{y},
+			},
+		)
+	}
 	got := d.Detect(context.Background(), scope, states)
 	if len(got) != 1 {
 		t.Fatalf("got %d signals, want 1", len(got))
 	}
 	if !got[0].Window.Start.Equal(got[0].Window.End) {
 		t.Errorf("window = %v..%v, want a degenerate point", got[0].Window.Start, got[0].Window.End)
+	}
+	if got[0].Metrics["aligned_samples"] != float64(len(ys)) {
+		t.Errorf("aligned_samples = %v, want %d", got[0].Metrics["aligned_samples"], len(ys))
 	}
 	advAssertSane(t, got)
 }
@@ -1149,4 +1171,292 @@ func TestFinding_DetectorsRequireChronologicalInput(t *testing.T) {
 			t.Errorf("engine-routed signal invalid: %v", err)
 		}
 	}
+}
+
+// --- Temporal semantics ----------------------------------------------------
+//
+// Pairwise detectors must not treat slice position as time. These cases
+// are the regression net for that invariant: identical shapes on
+// disjoint clocks are not a relationship, slopes are per hour, and a
+// repeating sequence on a chaotic clock is not seasonality.
+
+func TestCorrelation_MorningAndAfternoonAreNotRelated(t *testing.T) {
+	scope := uuid.New()
+	morning := time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)
+	afternoon := time.Date(2026, 1, 1, 14, 0, 0, 0, time.UTC)
+	ys := []float64{1, 2, 3, 4, 5}
+	offsets := []time.Duration{0, time.Minute, 2 * time.Minute, 3 * time.Minute, 4 * time.Minute}
+	ea, eb := uuid.New(), uuid.New()
+	states := append(
+		advSeriesAt(scope, ea, shiftOffsets(offsets, morning.Sub(advBase)), ys),
+		advSeriesAt(scope, eb, shiftOffsets(offsets, afternoon.Sub(advBase)), ys)...,
+	)
+	got := NewCorrelation(advCfg()).Detect(context.Background(), scope, states)
+	if len(got) != 0 {
+		t.Fatalf("got %d correlation signals from disjoint clocks, want 0", len(got))
+	}
+}
+
+func TestCorrelation_OffsetWithinAndOutsideTolerance(t *testing.T) {
+	scope := uuid.New()
+	ys := []float64{1, 2, 3, 4, 5, 6}
+	on := make([]time.Duration, len(ys))
+	near := make([]time.Duration, len(ys))
+	far := make([]time.Duration, len(ys))
+	for i := range ys {
+		on[i] = time.Duration(i) * time.Minute
+		near[i] = on[i] + 20*time.Second
+		far[i] = on[i] + 2*time.Hour
+	}
+	ea, eb := uuid.New(), uuid.New()
+	base := advSeriesAt(scope, ea, on, ys)
+
+	within := advCfg()
+	within.AlignTolerance = time.Minute
+	got := NewCorrelation(within).Detect(context.Background(), scope, append(append([]chronos.EntityState{}, base...), advSeriesAt(scope, eb, near, ys)...))
+	if len(got) != 1 {
+		t.Fatalf("within tolerance: got %d, want 1", len(got))
+	}
+	if got[0].Metrics["aligned_samples"] != float64(len(ys)) {
+		t.Fatalf("aligned_samples = %v, want %d", got[0].Metrics["aligned_samples"], len(ys))
+	}
+	if got[0].Metrics["alignment_tolerance_seconds"] != time.Minute.Seconds() {
+		t.Fatalf("tolerance metric = %v", got[0].Metrics["alignment_tolerance_seconds"])
+	}
+	advAssertSane(t, got)
+
+	outside := NewCorrelation(within).Detect(context.Background(), scope, append(append([]chronos.EntityState{}, base...), advSeriesAt(scope, uuid.New(), far, ys)...))
+	if len(outside) != 0 {
+		t.Fatalf("outside tolerance: got %d, want 0", len(outside))
+	}
+
+	exact := NewCorrelation(advCfg()).Detect(context.Background(), scope, append(append([]chronos.EntityState{}, base...), advSeriesAt(scope, uuid.New(), near, ys)...))
+	if len(exact) != 0 {
+		t.Fatalf("exact alignment of a 20s offset: got %d, want 0", len(exact))
+	}
+}
+
+func TestCorrelation_DifferentCadenceDoesNotInventPairs(t *testing.T) {
+	scope := uuid.New()
+	// A every minute, B halfway between those minutes. Exact alignment
+	// shares no timestamps, so a perfect ordinal match is not evidence.
+	ys := []float64{1, 2, 3, 4, 5, 6, 7, 8}
+	aOff := make([]time.Duration, len(ys))
+	bOff := make([]time.Duration, len(ys))
+	for i := range ys {
+		aOff[i] = time.Duration(i) * time.Minute
+		bOff[i] = aOff[i] + 30*time.Second
+	}
+	states := append(
+		advSeriesAt(scope, uuid.New(), aOff, ys),
+		advSeriesAt(scope, uuid.New(), bOff, ys)...,
+	)
+	got := NewCorrelation(advCfg()).Detect(context.Background(), scope, states)
+	if len(got) != 0 {
+		t.Fatalf("got %d signals from interleaved cadences, want 0", len(got))
+	}
+}
+
+func TestCorrelation_WindowIsContributingOverlap(t *testing.T) {
+	scope := uuid.New()
+	ys := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	ea, eb := uuid.New(), uuid.New()
+	a := advSeries(scope, ea, time.Hour, ys) // hours 0..9
+	b := advSeries(scope, eb, time.Hour, ys)
+	for i := range b {
+		b[i].Timestamp = b[i].Timestamp.Add(3 * time.Hour) // hours 3..12
+	}
+	got := NewCorrelation(advCfg()).Detect(context.Background(), scope, append(a, b...))
+	if len(got) != 1 {
+		t.Fatalf("got %d, want 1", len(got))
+	}
+	wantStart := advBase.Add(3 * time.Hour)
+	wantEnd := advBase.Add(9 * time.Hour)
+	if !got[0].Window.Start.Equal(wantStart) || !got[0].Window.End.Equal(wantEnd) {
+		t.Fatalf("window = %s..%s, want overlap %s..%s (not the union of both histories)",
+			got[0].Window.Start, got[0].Window.End, wantStart, wantEnd)
+	}
+	if got[0].Metrics["aligned_samples"] != 7 {
+		t.Fatalf("aligned_samples = %v, want 7", got[0].Metrics["aligned_samples"])
+	}
+}
+
+func TestCrossScopeCorrelation_DisjointClocksNoSignal(t *testing.T) {
+	sa, sb := uuid.New(), uuid.New()
+	ys := []float64{1, 2, 3, 4, 5, 6}
+	morning := advSeries(sa, uuid.New(), time.Minute, ys)
+	afternoon := advSeries(sb, uuid.New(), time.Minute, ys)
+	for i := range afternoon {
+		afternoon[i].Timestamp = afternoon[i].Timestamp.Add(8 * time.Hour)
+	}
+	got := NewCrossScopeCorrelation(advCfg()).CrossDetect(context.Background(), append(morning, afternoon...))
+	if len(got) != 0 {
+		t.Fatalf("got %d cross-scope signals from disjoint clocks, want 0", len(got))
+	}
+}
+
+func TestDivergence_SlopeIsCadenceInvariant(t *testing.T) {
+	// The same physical process — gap grows by 1 outcome unit per hour —
+	// sampled hourly and every ten minutes must report approximately
+	// the same per-hour slope. A per-step regression would report 1
+	// versus 1/6.
+	scope := uuid.New()
+	hourly := gapProcess(scope, time.Hour, 6)
+	dense := gapProcess(scope, 10*time.Minute, 31) // 0..5 hours inclusive
+	h := NewDivergence(advCfg()).Detect(context.Background(), scope, hourly)
+	d := NewDivergence(advCfg()).Detect(context.Background(), scope, dense)
+	if len(h) != 1 || len(d) != 1 {
+		t.Fatalf("hourly signals %d, dense signals %d, want 1 and 1", len(h), len(d))
+	}
+	hs, ds := h[0].Metrics["slope_per_hour"], d[0].Metrics["slope_per_hour"]
+	if math.Abs(hs-1) > 1e-9 {
+		t.Fatalf("hourly slope_per_hour = %v, want 1", hs)
+	}
+	if math.Abs(hs-ds) > 1e-6 {
+		t.Fatalf("slopes differ by cadence: hourly %v dense %v", hs, ds)
+	}
+	if h[0].Metrics["slope"] != hs {
+		t.Fatalf("slope %v and slope_per_hour %v diverged", h[0].Metrics["slope"], hs)
+	}
+	advAssertSane(t, h)
+	advAssertSane(t, d)
+}
+
+func TestDivergence_ErraticGapBelowFitNoSignal(t *testing.T) {
+	// Directional regression (R² ≈ 0.16) is not sustained divergence.
+	scope := uuid.New()
+	flat := advConst(0, 8)
+	gaps := []float64{1, 50, 2, 60, 3, 70, 4, 80}
+	states := append(
+		advSeries(scope, uuid.New(), time.Hour, flat),
+		advSeries(scope, uuid.New(), time.Hour, gaps)...,
+	)
+	got := NewDivergence(advCfg()).Detect(context.Background(), scope, states)
+	if len(got) != 0 {
+		t.Fatalf("got %d signals for an erratic gap (r2=%v), want 0", len(got), got[0].Metrics["r2"])
+	}
+}
+
+func TestDivergence_ShortDramaticGapIsStrongButNotConfident(t *testing.T) {
+	cfg := advCfg()
+	cfg.DivergenceMinPoints = 3
+	scope := uuid.New()
+	// Gap 0, 100, 200 over three hours: slope 100/hour, perfect fit,
+	// only three pairs.
+	states := append(
+		advSeries(scope, uuid.New(), time.Hour, []float64{0, 0, 0}),
+		advSeries(scope, uuid.New(), time.Hour, []float64{0, 100, 200})...,
+	)
+	got := NewDivergence(cfg).Detect(context.Background(), scope, states)
+	if len(got) != 1 {
+		t.Fatalf("got %d, want 1", len(got))
+	}
+	if got[0].Strength < 0.9 {
+		t.Fatalf("strength = %v, want a saturated shape", got[0].Strength)
+	}
+	// sampleFactor(3, 6) = 0.5, exact alignment quality = 1.
+	if math.Abs(got[0].Confidence-0.5) > 1e-9 {
+		t.Fatalf("confidence = %v, want 0.5 (sample size, not slope)", got[0].Confidence)
+	}
+	if got[0].Confidence >= got[0].Strength {
+		t.Fatalf("confidence %v should stay below strength %v", got[0].Confidence, got[0].Strength)
+	}
+}
+
+func TestConvergence_SlopeIsCadenceInvariant(t *testing.T) {
+	scope := uuid.New()
+	// Gap shrinks by 2 outcome units per hour.
+	build := func(step time.Duration, n int) []chronos.EntityState {
+		a := make([]float64, n)
+		b := make([]float64, n)
+		for i := range b {
+			hours := (time.Duration(i) * step).Hours()
+			b[i] = 12 - 2*hours
+		}
+		return append(
+			advSeries(scope, uuid.New(), step, a),
+			advSeries(scope, uuid.New(), step, b)...,
+		)
+	}
+	hourly := NewConvergence(advCfg()).Detect(context.Background(), scope, build(time.Hour, 6))
+	dense := NewConvergence(advCfg()).Detect(context.Background(), scope, build(10*time.Minute, 31))
+	if len(hourly) != 1 || len(dense) != 1 {
+		t.Fatalf("hourly %d dense %d, want 1 and 1", len(hourly), len(dense))
+	}
+	hs, ds := hourly[0].Metrics["slope_per_hour"], dense[0].Metrics["slope_per_hour"]
+	if math.Abs(hs-(-2)) > 1e-9 || math.Abs(hs-ds) > 1e-6 {
+		t.Fatalf("slopes hourly %v dense %v, want -2", hs, ds)
+	}
+}
+
+func TestSeasonality_ChaoticClockIsNotAPeriod(t *testing.T) {
+	scope := uuid.New()
+	ys := make([]float64, 24)
+	for i := range ys {
+		ys[i] = math.Sin(float64(i) * math.Pi / 2) // ordinal period 4
+	}
+	regular := NewSeasonality(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, ys))
+	if len(regular) != 1 {
+		t.Fatalf("regular cadence: got %d, want 1", len(regular))
+	}
+	if regular[0].Metrics["period_samples"] != 4 {
+		t.Fatalf("period_samples = %v, want 4", regular[0].Metrics["period_samples"])
+	}
+	if regular[0].Metrics["period"] != 4 {
+		t.Fatalf("period = %v, want sample lag 4", regular[0].Metrics["period"])
+	}
+	if math.Abs(regular[0].Metrics["sampling_interval_seconds"]-60) > 1e-9 {
+		t.Fatalf("sampling_interval_seconds = %v, want 60", regular[0].Metrics["sampling_interval_seconds"])
+	}
+	if math.Abs(regular[0].Metrics["period_seconds"]-240) > 1e-6 {
+		t.Fatalf("period_seconds = %v, want 240", regular[0].Metrics["period_seconds"])
+	}
+
+	// Same values, timestamps that wander. Ordinal autocorrelation
+	// would still see period 4; temporal seasonality must not.
+	offsets := make([]time.Duration, len(ys))
+	var acc time.Duration
+	for i := range offsets {
+		offsets[i] = acc
+		acc += time.Duration(1+i*i) * time.Second
+	}
+	chaotic := NewSeasonality(advCfg()).Detect(context.Background(), scope, advSeriesAt(scope, uuid.New(), offsets, ys))
+	if len(chaotic) != 0 {
+		t.Fatalf("chaotic timestamps: got %d seasonality signals, want 0", len(chaotic))
+	}
+}
+
+func TestOscillation_IgnoresCadence(t *testing.T) {
+	scope := uuid.New()
+	ys := []float64{1, 5, 1, 5, 1, 5, 1, 5}
+	minute := NewOscillation(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Minute, ys))
+	hour := NewOscillation(advCfg()).Detect(context.Background(), scope, advSeries(scope, uuid.New(), time.Hour, ys))
+	if len(minute) != 1 || len(hour) != 1 {
+		t.Fatalf("minute %d hour %d, want 1 and 1", len(minute), len(hour))
+	}
+	if minute[0].Metrics["flip_rate"] != hour[0].Metrics["flip_rate"] {
+		t.Fatalf("flip_rate changed with cadence: %v vs %v", minute[0].Metrics["flip_rate"], hour[0].Metrics["flip_rate"])
+	}
+}
+
+// gapProcess builds a flat series and a partner whose outcome equals
+// elapsed hours, so |a−b| grows by 1 per hour regardless of step.
+func gapProcess(scope uuid.UUID, step time.Duration, n int) []chronos.EntityState {
+	flat := make([]float64, n)
+	rising := make([]float64, n)
+	for i := range rising {
+		rising[i] = (time.Duration(i) * step).Hours()
+	}
+	return append(
+		advSeries(scope, uuid.New(), step, flat),
+		advSeries(scope, uuid.New(), step, rising)...,
+	)
+}
+
+func shiftOffsets(offsets []time.Duration, by time.Duration) []time.Duration {
+	out := make([]time.Duration, len(offsets))
+	for i, d := range offsets {
+		out[i] = d + by
+	}
+	return out
 }

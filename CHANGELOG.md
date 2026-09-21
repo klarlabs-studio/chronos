@@ -6,6 +6,17 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING (fewer signals, same HTTP shape).** Correlation, Cross-Scope Correlation, Divergence, and Convergence no longer pair observations by slice index. They use a shared nearest-within alignment (`CHRONOS_ALIGN_TOLERANCE`, default `0` = exact timestamps) and count **aligned pairs** toward the minimum sample. Disjoint clocks that happen to share a shape emit nothing. Pairwise signal windows span only the aligned observations. Detector versions: `correlation-v2`, `cross_scope_correlation-v2`. See [`docs/temporal-semantics.md`](docs/temporal-semantics.md).
+- **BREAKING (`divergence-v2`, `convergence-v2`).** `slope`, `abs_slope`, and evidence score are gap units **per hour**, not per ordinal step. `slope_per_hour` is the same value under an explicit name. Emission also requires R² ≥ `CHRONOS_DIVERGENCE_MIN_R2` / `CHRONOS_CONVERGENCE_MIN_R2` (default `0.5`). Confidence is aligned sample size × alignment quality, not a copy of strength. Sampling faster no longer inflates the slope.
+- **BREAKING (fewer seasonality signals, `seasonality-v2`).** Ordinal autocorrelation runs only when inter-observation intervals are regular (CV ≤ `CHRONOS_SEASONALITY_MAX_INTERVAL_CV`, default `0`). A repeating sequence on a chaotic clock is not a period. New metrics: `period_samples`, `period_seconds`, `sampling_interval_seconds`. `period` remains the lag in samples.
+
+### Added
+
+- Shared internal alignment (`AlignNearest`): exact or nearest-within, one observation per pair, deterministic tie-break, no interpolation.
+- Pairwise metrics `aligned_samples` and `alignment_tolerance_seconds`. Divergence/Convergence also report `r_squared` (same value as `r2`).
+
 ## [0.18.0] - 2026-09-20
 
 ### Added

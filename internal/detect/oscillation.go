@@ -11,16 +11,18 @@ import (
 )
 
 // Oscillation detects PatternTypeOscillation: the outcome repeatedly
-// reverses direction. Method: among consecutive first-differences that
-// are large enough to count as real moves, measure the fraction that
-// change sign. Emit when that flip rate clears
-// CHRONOS_OSCILLATION_MIN_FLIP_RATE.
+// reverses direction across successive observations.
 //
-// Distinct from Seasonality (periodic positive autocorrelation) and
-// from Stall (low variance — Stall series have too few meaningful
-// differences to accumulate a high flip rate).
+// This is an ordinal pattern. It asks whether the recorded sequence
+// flips sign, not at what temporal frequency it oscillates. Two series
+// with the same values in the same order produce the same result
+// regardless of the timestamps between them. That is intentional.
+// Frequency or period detection belongs to Seasonality (and would be a
+// separate detector if Chronos later measured oscillation rate).
 //
-// Strength is the flip rate. Confidence scales by sample size.
+// Method: among consecutive first-differences that are large enough to
+// count as real moves, measure the fraction that change sign. Emit
+// when that flip rate clears CHRONOS_OSCILLATION_MIN_FLIP_RATE.
 type Oscillation struct {
 	cfg *config.Config
 	now func() time.Time

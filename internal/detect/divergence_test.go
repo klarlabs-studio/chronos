@@ -2,6 +2,7 @@ package detect
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -16,8 +17,10 @@ func divergenceCfg() *config.Config {
 		MaxSignalsPerRun:     100,
 		DivergenceMinSlope:   0.05,
 		DivergenceMinPoints:  5,
+		DivergenceMinR2:      0.5,
 		ConvergenceMinSlope:  0.05,
 		ConvergenceMinPoints: 5,
+		ConvergenceMinR2:     0.5,
 	}
 }
 
@@ -42,6 +45,13 @@ func TestDivergence_GrowingGapEmits(t *testing.T) {
 	}
 	if sig.Metrics["slope"] <= 0 {
 		t.Errorf("slope = %v, want positive", sig.Metrics["slope"])
+	}
+	// Hourly samples, gap grows by 1 per hour.
+	if math.Abs(sig.Metrics["slope_per_hour"]-1) > 1e-9 {
+		t.Errorf("slope_per_hour = %v, want 1", sig.Metrics["slope_per_hour"])
+	}
+	if sig.Metrics["r_squared"] < 0.99 {
+		t.Errorf("r_squared = %v, want a clean line", sig.Metrics["r_squared"])
 	}
 	if sig.Series != a {
 		t.Errorf("Series = %v, want lex-smaller %v", sig.Series, a)

@@ -52,7 +52,7 @@ It implements Intent principle 4 ([`intent.md`](intent.md)).
 
 ## Sparse and irregular series
 
-- Irregular sampling intervals are first-class. Detectors that assume fixed cadence must document that assumption and fail closed (no signal) when it does not hold, or operate on ordinal index / wall-clock explicitly.
+- Irregular sampling intervals are first-class. Detectors that assume fixed cadence must document that assumption and fail closed (no signal) when it does not hold, or operate on ordinal index / wall-clock explicitly. Seasonality fails closed unless interval CV is within `CHRONOS_SEASONALITY_MAX_INTERVAL_CV`. Pairwise relationship detectors align on timestamps ([`temporal-semantics.md`](temporal-semantics.md)); they do not pair by slice index.
 - Sparse series and insufficient history are “no signal” cases. Each detector’s minimum sample count is a config knob; falling short never manufactures confidence.
 
 ## Missing features and malformed numerics
