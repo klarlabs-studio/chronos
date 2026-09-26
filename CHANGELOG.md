@@ -6,6 +6,36 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Fixed
+- **Retention can no longer stop silently.** In production it stopped
+  around 2026-09-21 05:09 and nothing said so for five days: the oldest
+  surviving signal was six days old under a 12-hour retention, the
+  evidence table had grown from 3.65 GB to 5.1 GB, and every restart
+  then spent 70 minutes draining 4,858 overdue signals through a
+  saturated volume.
+
+  Every retention batch ran on the process's own context with no
+  deadline. A batch waiting on a connection that never answers blocks
+  the retention goroutine for the rest of the process's life, and
+  `time.Ticker` drops the ticks it cannot deliver -- so no error, no
+  further sweep and no log line. Each batch now has a 10-minute
+  deadline (~4x the slowest live batch measured, 140s under I/O
+  saturation); a timed-out batch logs an error and the next sweep
+  retries. The sweep as a whole has no deadline, because a legitimate
+  first sweep over a backlog takes as long as the backlog does.
+
+### Added
+- **A retention alarm.** Every sweep interval, a goroutine separate from
+  the sweeper counts signals older than retention plus a grace of two
+  sweep intervals, and logs `scheduler: retention is behind` at WARN
+  with the count when there are any, then one INFO line when it clears.
+  It reads the data rather than the sweeper's account of itself, so it
+  catches a hung query, repeated failures, a store that deletes nothing
+  and a sweeper that never started alike -- and it lives outside the
+  retention goroutine because a stuck sweep cannot report its own hang.
+  The check is an indexed count through the existing `Count` port with
+  its own 30-second deadline.
+
 ## [0.21.0] - 2026-09-26
 
 ### Fixed

@@ -34,6 +34,14 @@ type Scheduler struct {
 	lookback      time.Duration
 	sweepInterval time.Duration
 	logger        *slog.Logger
+
+	// batchTimeout overrides retentionBatchTimeout; zero means the
+	// default. Unexported: it exists so tests can simulate a hung batch
+	// without waiting ten minutes.
+	batchTimeout time.Duration
+	// retentionBehind is touched only by watchRetention's goroutine. It
+	// turns the recovery into one INFO line instead of silence.
+	retentionBehind bool
 }
 
 // NewScheduler builds a scheduler. interval == 0 produces a scheduler
@@ -137,6 +145,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	// reads observations, the other deletes aged signals. Only the
 	// shared goroutine coupled them.
 	go s.retain(ctx)
+	go s.watchRetention(ctx)
 
 	for {
 		select {
@@ -159,11 +168,7 @@ func (s *Scheduler) retain(ctx context.Context) {
 	// A far slower clock than detection. Tying retention to the
 	// detection interval would issue a DELETE every few seconds to
 	// reclaim the handful of rows that aged out since the last one.
-	every := s.sweepInterval
-	if every <= 0 {
-		every = retentionSweepInterval
-	}
-	sweeps := time.NewTicker(every)
+	sweeps := time.NewTicker(s.sweepEvery())
 	defer sweeps.Stop()
 
 	s.sweep(ctx)
@@ -195,6 +200,105 @@ const retentionSweepInterval = 5 * time.Minute
 // whereas one unbounded statement consumed ~64MB/min until it was
 // cancelled.
 const retentionBatchSize = 200
+
+// retentionBatchTimeout bounds how long one retention batch may run.
+//
+// Without it a batch waiting on a connection that never answers blocks
+// the retention goroutine for the rest of the process's life, and
+// time.Ticker silently drops every tick it cannot deliver -- so there is
+// no error, no further sweep, and no log line at all. That is what
+// happened in production: retention stopped around 2026-09-21 05:09 and
+// the next thing anyone saw was a six-day-old signal under a 12-hour
+// retention, five days later.
+//
+// Ten minutes is ~4x the slowest live batch measured (140s in
+// IO/DataFileRead, with the volume saturated by a backlog drain), so a
+// slow batch completes and a dead one gives up. The sweep returns, and
+// the next tick of the sweep clock tries again.
+const retentionBatchTimeout = 10 * time.Minute
+
+// retentionCheckTimeout bounds the retention alarm's own query, so a
+// database that has stopped answering produces an error line rather
+// than a second silent hang.
+const retentionCheckTimeout = 30 * time.Second
+
+func (s *Scheduler) batchDeadline() time.Duration {
+	if s.batchTimeout > 0 {
+		return s.batchTimeout
+	}
+	return retentionBatchTimeout
+}
+
+func (s *Scheduler) sweepEvery() time.Duration {
+	if s.sweepInterval > 0 {
+		return s.sweepInterval
+	}
+	return retentionSweepInterval
+}
+
+// watchRetention runs checkRetention on the sweep clock until ctx ends.
+//
+// It is deliberately a separate goroutine from retain. A sweep cannot
+// report its own hang -- the goroutine that would log it is the one
+// that is stuck -- so the check has to live somewhere the hang cannot
+// reach. The timeout on each batch makes a hang recover; this is what
+// makes it visible, including every failure mode the timeout does not
+// cover.
+func (s *Scheduler) watchRetention(ctx context.Context) {
+	if s.retention <= 0 {
+		return
+	}
+	t := time.NewTicker(s.sweepEvery())
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.checkRetention(ctx)
+		}
+	}
+}
+
+// checkRetention warns when the store holds signals older than
+// retention plus a grace period.
+//
+// It reads the data rather than the sweeper's own account of itself.
+// Whatever stops retention -- a hung query, repeated failures, a store
+// that silently deletes nothing, a sweeper that never started -- the
+// symptom is the same, and this is the symptom.
+//
+// Grace is two sweep intervals: time for a signal that has just aged
+// out to be reached by the next sweep, plus one more in case that sweep
+// is still working through a batch. A deployment draining a real
+// backlog will warn until the backlog is gone, which is correct -- data
+// that old should not have been there.
+func (s *Scheduler) checkRetention(ctx context.Context) {
+	if s.retention <= 0 {
+		return
+	}
+	grace := 2 * s.sweepEvery()
+	overdueBefore := time.Now().Add(-s.retention - grace)
+
+	checkCtx, cancel := context.WithTimeout(ctx, retentionCheckTimeout)
+	defer cancel()
+	n, err := s.signals.Count(checkCtx, ports.SignalFilter{Until: &overdueBefore})
+	if err != nil {
+		s.logger.Error("scheduler: retention check failed", "err", err)
+		return
+	}
+	if n > 0 {
+		s.retentionBehind = true
+		s.logger.Warn("scheduler: retention is behind",
+			"overdue", n, "detected_before", overdueBefore,
+			"retention", s.retention, "grace", grace)
+		return
+	}
+	if s.retentionBehind {
+		s.retentionBehind = false
+		s.logger.Info("scheduler: retention caught up", "retention", s.retention)
+	}
+}
 
 // sweep deletes signals detected longer ago than the configured
 // retention, and does nothing at all when retention is disabled.
@@ -232,11 +336,21 @@ func (s *Scheduler) sweep(ctx context.Context) {
 	// later, by which point it is an hour larger.
 	var total int64
 	for {
-		n, err := retainer.DeleteSignalsOlderThan(ctx, cutoff, retentionBatchSize)
+		// Each batch gets its own deadline; the sweep as a whole does
+		// not, because a legitimate first sweep over a large backlog runs
+		// for as long as the backlog takes.
+		batchCtx, cancel := context.WithTimeout(ctx, s.batchDeadline())
+		n, err := retainer.DeleteSignalsOlderThan(batchCtx, cutoff, retentionBatchSize)
+		timedOut := errors.Is(batchCtx.Err(), context.DeadlineExceeded)
+		cancel()
 		switch {
 		case errors.Is(err, ports.ErrNotImplemented):
 			s.logger.Error("scheduler: signal retention configured but the store does not support it; signals will not be pruned",
 				"retention", s.retention)
+			return
+		case err != nil && timedOut:
+			s.logger.Error("scheduler: retention batch timed out; retrying on the next sweep",
+				"timeout", s.batchDeadline(), "cutoff", cutoff, "deleted_before_timeout", total, "err", err)
 			return
 		case err != nil:
 			s.logger.Error("scheduler: signal retention sweep failed",
