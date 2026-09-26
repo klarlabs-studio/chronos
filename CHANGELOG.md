@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-26
+
 ### Fixed
 - **Saving a signal no longer costs one round trip per evidence row.**
   The PostgreSQL and MySQL stores inserted evidence one row per
