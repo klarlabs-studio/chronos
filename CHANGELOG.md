@@ -6,6 +6,19 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Changed
+- **Recurrence signals carry at most 50 evidence rows (`recurrence-v2`).**
+  Recurrence attached one `similar_state` row per matching historical
+  peer, which grows with history: production signals carried ~4,000
+  rows each, 99.9% of all stored evidence, about 4 million rows an hour
+  against a 12-hour retention window. Evidence now holds the 50 most
+  similar peers (ties broken by recency, then series). `Strength`,
+  `Confidence`, `ConfidenceClass`, `metrics.sample_size`,
+  `Explanation.comparable_peers` and the window are still computed over
+  every match, so a signal means exactly what it did before; consumers
+  that counted evidence rows to get the peer count should read
+  `sample_size` instead.
+
 ## [0.22.0] - 2026-09-26
 
 ### Fixed

@@ -9,7 +9,7 @@ import (
 // logic drift. Bump the suffix when the detector's math or evidence
 // shape changes in a way that would invalidate prior explanations.
 const (
-	detectorVersionRecurrence            = "recurrence-v1"
+	detectorVersionRecurrence            = "recurrence-v2"
 	detectorVersionTrend                 = "trend-v2"
 	detectorVersionSpike                 = "spike-v2"
 	detectorVersionDrop                  = "drop-v2"
