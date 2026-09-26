@@ -7,6 +7,19 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 ## [Unreleased]
 
 ### Fixed
+- **Saving a signal no longer costs one round trip per evidence row.**
+  The PostgreSQL and MySQL stores inserted evidence one row per
+  statement. Production recurrence signals carry ~2,850 evidence rows
+  each, so every save was ~2,850 round trips; at ~5 ms each, one save
+  took ~15 s and one detection tick spent 48 minutes saving 200 signals
+  while chronos sat at 1% CPU waiting on the network. Evidence is now
+  written in multi-row INSERTs of up to 1,000 rows -- three statements
+  for that signal -- inside the same transaction, with identical rows.
+  Measured on a local PostgreSQL 16, where a round trip is ~0.1 ms, a
+  2,850-row save went from 305 ms to 49 ms; the saving grows with
+  round-trip latency. A new conformance group, `Signal/LargeEvidence`,
+  round-trips 2,501 evidence rows and then replaces them with 1,207 on
+  every backend.
 - **Retention can no longer stop silently.** In production it stopped
   around 2026-09-21 05:09 and nothing said so for five days: the oldest
   surviving signal was six days old under a 12-hour retention, the
