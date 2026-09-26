@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-26
+
 ### Fixed
 - **The scheduler no longer goes silent once its history outranks its
   present.** After every restart a production deployment emitted one
