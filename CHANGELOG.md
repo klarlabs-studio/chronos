@@ -6,6 +6,37 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Fixed
+- **The scheduler no longer goes silent once its history outranks its
+  present.** After every restart a production deployment emitted one
+  burst and then nothing, although 67 observations kept arriving every
+  five minutes: no persisted signal had a window ending after the
+  first tick.
+
+  Each tick re-derives every event in the lookback -- last hour's change
+  point has the same identity and window on every tick -- and the
+  scheduler skips the ones it has already saved. It skipped them
+  *after* `Engine.Detect` had applied `MaxSignalsPerRun`. Once saved
+  events outranked new ones they took every slot on every tick, all of
+  them were skipped as duplicates, and the new events were truncated
+  before the duplicate check could see them. The deployment had 261
+  distinct series/pattern combinations in its lookback against a cap of
+  200, at an average confidence of 0.943.
+
+  `Engine.DetectExcluding` removes signals the caller already knows
+  about *before* the cap, and the scheduler uses it. `Detect` is
+  unchanged for every other caller. Peak memory is unchanged: the full
+  candidate list was always built before being truncated. The cost is
+  one duplicate check per candidate rather than per surviving signal;
+  each is an index-only scan on `idx_signals_identity`, measured at
+  0.2-0.4 ms warm on PostgreSQL.
+
+### Added
+- **A `scheduler: tick` log line per tick** with `scopes`,
+  `candidates`, `known`, `novel`, `saved` and `duration`. Whether
+  detection is producing, and what the duplicate check costs, can now
+  be read from the log rather than only by querying the store.
+
 ## [0.20.0] - 2026-09-26
 
 ### Fixed

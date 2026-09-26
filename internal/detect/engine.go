@@ -115,6 +115,24 @@ func DefaultDetectors(cfg *config.Config) []Detector {
 // the scope map in Go's randomised iteration order would make the
 // surviving set differ between runs over identical input.
 func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []domain.Signal {
+	return e.DetectExcluding(ctx, states, nil)
+}
+
+// DetectExcluding is Detect with one difference: signals for which known
+// returns true are removed BEFORE the MaxSignalsPerRun cap is applied,
+// so the cap is spent only on signals the caller can still use. A nil
+// known excludes nothing, which is exactly Detect.
+//
+// It exists for the scheduler. Every tick re-derives every event in the
+// lookback -- last hour's change point has the same identity and window
+// on every tick -- and the scheduler drops the ones it has already
+// saved. Filtering after the cap meant that once saved events outranked
+// new ones they took every slot, every tick: the new events were
+// truncated before the duplicate check could see them, and a deployment
+// went silent for as long as its history stayed more confident than its
+// present. Peak memory is unchanged; the full candidate list was already
+// built before the cap ever truncated it.
+func (e *Engine) DetectExcluding(ctx context.Context, states []chronos.EntityState, known func(domain.Signal) bool) []domain.Signal {
 	if len(states) == 0 {
 		return nil
 	}
@@ -153,6 +171,16 @@ func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []dom
 	}
 
 	stampRun(all)
+
+	if known != nil {
+		novel := all[:0]
+		for _, s := range all {
+			if !known(s) {
+				novel = append(novel, s)
+			}
+		}
+		all = novel
+	}
 
 	if e.cfg.MaxSignalsPerRun > 0 && len(all) > e.cfg.MaxSignalsPerRun {
 		var dropped []domain.Signal
