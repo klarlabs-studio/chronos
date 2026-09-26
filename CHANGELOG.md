@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-26
+
 ### Changed
 - **Recurrence signals carry at most 50 evidence rows (`recurrence-v2`).**
   Recurrence attached one `similar_state` row per matching historical
