@@ -87,7 +87,7 @@ Full reference: [`docs/configuration.md`](configuration.md).
 
 ### Prometheus
 
-Scrape `/metrics`:
+Scrape `/metrics`. When `CHRONOS_API_TOKEN` is set, `/metrics` requires the same bearer token as the API:
 
 ```yaml
 scrape_configs:
@@ -96,15 +96,35 @@ scrape_configs:
       - targets: ['chronos:7778']
     metrics_path: /metrics
     scrape_interval: 15s
+    authorization:
+      credentials_file: /etc/prometheus/chronos-token
 ```
 
 Key metrics:
 
 - `chronos_signals_emitted_total{pattern}` — detector throughput per pattern.
-- `chronos_observations_ingested_total` — ingest rate.
-- `chronos_compute_duration_seconds_bucket` — Compute latency histogram.
-- `chronos_webhook_deliveries_total{status}` — webhook fan-out outcomes.
-- `chronos_sse_clients` — current SSE subscribers.
+- `chronos_observations_total{adapter}` — ingest rate.
+- `chronos_detector_duration_seconds_sum` / `_count{pattern}` — detector wall time.
+- `chronos_signals_truncated_total{pattern}` — signals dropped by `MaxSignalsPerRun`.
+- `chronos_webhook_deliveries_total{outcome,status}` — webhook fan-out outcomes.
+- `chronos_scheduler_ticks_total`, `chronos_scheduler_signals_saved_total`, `chronos_scheduler_save_failures_total` — detection scheduler throughput.
+- `chronos_scheduler_last_tick_timestamp_seconds` — when the last detection tick completed. Absent until the first tick.
+- `chronos_retention_overdue_signals` — signals older than retention plus two sweep intervals; above zero means retention is behind.
+- `chronos_retention_signals_deleted_total`, `chronos_retention_last_sweep_timestamp_seconds` — retention progress; the timestamp only moves when a sweep completes without error.
+
+Alert on the scheduler's health, not only on HTTP. Both production stalls so far (detection silent for hours, retention stopped for five days) served every request normally:
+
+```yaml
+- alert: ChronosDetectionStalled
+  expr: time() - chronos_scheduler_last_tick_timestamp_seconds > 600
+  for: 5m
+- alert: ChronosRetentionBehind
+  expr: chronos_retention_overdue_signals > 0
+  for: 15m
+- alert: ChronosRetentionSweepFailing
+  expr: time() - chronos_retention_last_sweep_timestamp_seconds > 3 * <sweep interval in seconds>
+  for: 5m
+```
 
 ### Grafana
 

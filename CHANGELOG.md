@@ -6,6 +6,25 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Added
+- **Scheduler and retention health metrics.** `/metrics` now exports
+  `chronos_scheduler_ticks_total`, `chronos_scheduler_signals_saved_total`,
+  `chronos_scheduler_save_failures_total`,
+  `chronos_scheduler_last_tick_timestamp_seconds`,
+  `chronos_retention_overdue_signals`,
+  `chronos_retention_signals_deleted_total` and
+  `chronos_retention_last_sweep_timestamp_seconds`. Detection going silent
+  and retention stopping were both visible only in logs; these let
+  Prometheus alert on them. The timestamp gauges are absent until their
+  first observation, and a failed sweep does not refresh the last-sweep
+  timestamp. Example alert rules are in `docs/DEPLOYMENT.md`.
+
+### Fixed
+- `docs/DEPLOYMENT.md` listed metrics Chronos does not export
+  (`chronos_observations_ingested_total`,
+  `chronos_compute_duration_seconds_bucket`, `chronos_sse_clients`); it
+  now lists the ones it does.
+
 ## [0.23.0] - 2026-09-26
 
 ### Changed
