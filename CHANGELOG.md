@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-26
+
 ### Added
 - **Scheduler and retention health metrics.** `/metrics` now exports
   `chronos_scheduler_ticks_total`, `chronos_scheduler_signals_saved_total`,
