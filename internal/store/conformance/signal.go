@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ func signalGroups() []group {
 		{"Signal/LimitAndPaging", signalLimitAndPaging},
 		{"Signal/Retention", signalRetention},
 		{"Signal/Concurrency", signalConcurrency},
+		{"Signal/LargeEvidence", signalLargeEvidence},
 	}
 }
 
@@ -688,4 +690,70 @@ func requireTimeEqual(t *testing.T, field string, got, want time.Time, precision
 	if got.Location() != time.UTC {
 		t.Errorf("%s came back in zone %v, want UTC", field, got.Location())
 	}
+}
+
+// signalLargeEvidence pins that evidence far larger than one insert
+// statement survives a save and a Get intact, and that a second save
+// replaces it rather than appending.
+//
+// Production recurrence signals carry ~2,850 evidence rows each. The SQL
+// stores wrote them one INSERT per row, which is ~2,850 round trips per
+// save; at a few milliseconds each a single tick spent 48 minutes saving
+// 200 signals. Batching the insert changes how rows reach the database,
+// so the contract it must keep is pinned here across batch boundaries:
+// 2,501 rows is not a multiple of any plausible batch size, and the
+// replacement set of 1,207 is smaller, so a batch-size bug shows up as a
+// wrong count in one direction or the other.
+func signalLargeEvidence(t *testing.T, b Backend) {
+	s := open(t, b)
+	ctx := context.Background()
+	scope, series := uuid.New(), uuid.New()
+
+	evidence := func(n int, kind string) []domain.Evidence {
+		out := make([]domain.Evidence, n)
+		for i := range out {
+			out[i] = domain.Evidence{
+				Series:  series,
+				Time:    base.Add(time.Duration(i) * time.Second),
+				Kind:    kind,
+				Score:   float64(i) / 4,
+				Metrics: map[string]float64{"i": float64(i)},
+			}
+		}
+		return out
+	}
+	check := func(label string, want []domain.Evidence, got []domain.Evidence) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("%s: got %d evidence rows, want %d", label, len(got), len(want))
+		}
+		sort.Slice(got, func(i, j int) bool { return got[i].Time.Before(got[j].Time) })
+		for i := range want {
+			g, w := got[i], want[i]
+			if !g.Time.Equal(w.Time) || g.Kind != w.Kind || g.Score != w.Score || g.Series != w.Series || g.Metrics["i"] != w.Metrics["i"] {
+				t.Fatalf("%s: evidence %d = %+v, want %+v", label, i, g, w)
+			}
+		}
+	}
+
+	sig := signalFixture(scope, series, base.Add(3*time.Hour), 0.8)
+	sig.Evidence = evidence(2501, "large_a")
+	if err := s.Signals.Save(ctx, sig); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := s.Signals.Get(ctx, sig.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	check("first save", sig.Evidence, got.Evidence)
+
+	sig.Evidence = evidence(1207, "large_b")
+	if err := s.Signals.Save(ctx, sig); err != nil {
+		t.Fatalf("re-Save: %v", err)
+	}
+	got, err = s.Signals.Get(ctx, sig.ID)
+	if err != nil {
+		t.Fatalf("Get after re-Save: %v", err)
+	}
+	check("re-save replaces", sig.Evidence, got.Evidence)
 }

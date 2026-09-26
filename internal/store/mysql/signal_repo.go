@@ -17,6 +17,44 @@ import (
 // SignalRepository persists signals and their evidence in MySQL.
 type SignalRepository struct{ conn *Conn }
 
+// evidenceRowsPerInsert is how many evidence rows one INSERT carries.
+//
+// Evidence used to be written one row per statement, and production
+// recurrence signals carry ~2,850 rows each -- ~2,850 round trips per
+// save. See the PostgreSQL store for the measurement that found it.
+//
+// 1,000 rows is 6,000 placeholders, inside MySQL's 65,535 limit, and a
+// few hundred KB of statement, far inside the default max_allowed_packet.
+const evidenceRowsPerInsert = 1000
+
+// insertEvidence writes a signal's evidence in multi-row INSERTs inside
+// the caller's transaction. Rows, values and atomicity are exactly what
+// the per-row loop produced; only the number of round trips changes.
+func insertEvidence(ctx context.Context, tx *sql.Tx, sig domain.Signal) error {
+	const cols = 6
+	for start := 0; start < len(sig.Evidence); start += evidenceRowsPerInsert {
+		chunk := sig.Evidence[start:min(start+evidenceRowsPerInsert, len(sig.Evidence))]
+		var q strings.Builder
+		q.WriteString("INSERT INTO signal_evidence (signal_id, series_id, time, kind, score, metrics) VALUES ")
+		args := make([]any, 0, len(chunk)*cols)
+		for i, e := range chunk {
+			evMetrics, err := encodeMetrics(e.Metrics)
+			if err != nil {
+				return fmt.Errorf("signal save: encode evidence metrics: %w", err)
+			}
+			if i > 0 {
+				q.WriteString(", ")
+			}
+			q.WriteString("(?, ?, ?, ?, ?, ?)")
+			args = append(args, sig.ID.String(), e.Series.String(), e.Time.UTC(), e.Kind, e.Score, string(evMetrics))
+		}
+		if _, err := tx.ExecContext(ctx, q.String(), args...); err != nil {
+			return fmt.Errorf("signal save: insert evidence: %w", err)
+		}
+	}
+	return nil
+}
+
 // Save writes a signal and its evidence atomically.
 func (r *SignalRepository) Save(ctx context.Context, sig domain.Signal) error {
 	if err := sig.Validate(); err != nil {
@@ -70,18 +108,8 @@ func (r *SignalRepository) Save(ctx context.Context, sig domain.Signal) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM signal_evidence WHERE signal_id = ?`, sig.ID.String()); err != nil {
 		return fmt.Errorf("signal save: clear evidence: %w", err)
 	}
-	for _, e := range sig.Evidence {
-		evMetrics, err := encodeMetrics(e.Metrics)
-		if err != nil {
-			return fmt.Errorf("signal save: encode evidence metrics: %w", err)
-		}
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO signal_evidence (signal_id, series_id, time, kind, score, metrics)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, sig.ID.String(), e.Series.String(), e.Time.UTC(), e.Kind, e.Score, string(evMetrics))
-		if err != nil {
-			return fmt.Errorf("signal save: insert evidence: %w", err)
-		}
+	if err := insertEvidence(ctx, tx, sig); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("signal save: commit: %w", err)
