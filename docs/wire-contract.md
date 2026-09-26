@@ -29,7 +29,7 @@ gRPC RPCs match the HTTP surface additively: unary `Ingest` + `IngestBatch`, `Li
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v1`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v2`, `correlation-v2`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v2`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
+Current `detector_version` values: `recurrence-v2`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v2`, `correlation-v2`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v2`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
 
 Which detectors treat time as order, as a rate, as a join, or as a period is in [`temporal-semantics.md`](temporal-semantics.md).
 

@@ -115,7 +115,7 @@ The Engine groups input states by scope, sorts each group ascending by timestamp
 - At least `MinSampleSize` peers are required to emit a signal.
 - `Strength = avg(peer similarity)`.
 - `Confidence = strength × min(samples / 5, 1)` — diminishing returns above five samples are intentional.
-- Evidence kind `similar_state`, with `metrics["outcome_diff"] = peer.outcome - subject.outcome`.
+- Evidence kind `similar_state`, with `metrics["outcome_diff"] = peer.outcome - subject.outcome`. Evidence holds the 50 most similar peers (`recurrence-v2`); `sample_size`, `Strength`, `Explanation.comparable_peers` and the window still cover every match.
 
 ### Other available detectors
 

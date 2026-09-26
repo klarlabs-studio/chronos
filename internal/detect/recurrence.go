@@ -101,11 +101,17 @@ func (r *Recurrence) gatherEvidence(subjectID uuid.UUID, subject chronos.EntityS
 	return ev
 }
 
+// maxRecurrenceEvidence bounds the evidence rows a recurrence signal
+// carries. Evidence exists to show why the signal fired; the closest
+// peers do that, and a long-lived scope can otherwise match thousands.
+// Aggregates (strength, sample_size, window) still cover every match.
+const maxRecurrenceEvidence = 50
+
 // buildSignal assembles a Signal from the gathered evidence. Strength is
 // the average similarity (intensity of the pattern); Confidence
 // additionally factors in sample size, saturating at five samples.
 func (r *Recurrence) buildSignal(scopeID uuid.UUID, subject chronos.EntityState, evidence []domain.Evidence) domain.Signal {
-	sort.Slice(evidence, func(i, j int) bool { return evidence[i].Score > evidence[j].Score })
+	sort.Slice(evidence, func(i, j int) bool { return closerPeer(evidence[i], evidence[j]) })
 
 	strength := averageScore(evidence)
 	confidence := strength * sampleFactor(len(evidence), 5)
@@ -127,7 +133,7 @@ func (r *Recurrence) buildSignal(scopeID uuid.UUID, subject chronos.EntityState,
 		Strength:        strength,
 		Confidence:      confidence,
 		ConfidenceClass: ClassifyConfidence(len(evidence), r.cfg.MinSampleSize, r.cfg),
-		Evidence:        evidence,
+		Evidence:        evidence[:min(len(evidence), maxRecurrenceEvidence)],
 		Explanation:     explainSeries([]chronos.EntityState{subject}, len(evidence), r.cfg.SimilarityThreshold, detectorVersionRecurrence),
 		Metrics: map[string]float64{
 			"avg_similarity":   strength,
@@ -135,6 +141,18 @@ func (r *Recurrence) buildSignal(scopeID uuid.UUID, subject chronos.EntityState,
 			"avg_outcome_diff": averageOutcomeDiff(evidence),
 		},
 	}
+}
+
+// closerPeer orders evidence by similarity, then recency, then series, so
+// the kept subset is deterministic when scores tie.
+func closerPeer(a, b domain.Evidence) bool {
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	if !a.Time.Equal(b.Time) {
+		return a.Time.After(b.Time)
+	}
+	return a.Series.String() < b.Series.String()
 }
 
 func averageScore(ev []domain.Evidence) float64 {
