@@ -104,13 +104,14 @@ func DefaultDetectors(cfg *config.Config) []Detector {
 }
 
 // Detect groups states by scope and runs every detector against each
-// group. The combined output is sorted by detected-at descending,
-// confidence descending, and capped at cfg.MaxSignalsPerRun.
+// group. Every signal from one call shares a single DetectedAt, the
+// output is capped at cfg.MaxSignalsPerRun by capFairly (round-robin
+// across patterns, most confident first within each), and the survivors
+// are returned sorted by confidence descending.
 //
 // Scopes are visited in ascending scope-ID order. That sort is not
-// cosmetic: the final sort is stable, so signals that tie on
-// detected-at and confidence keep the order the detectors produced
-// them in, and MaxSignalsPerRun then truncates the tail. Visiting
+// cosmetic: every sort here is stable, so signals that tie on
+// confidence keep the order the detectors produced them in. Visiting
 // the scope map in Go's randomised iteration order would make the
 // surviving set differ between runs over identical input.
 func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []domain.Signal {
@@ -151,22 +152,103 @@ func (e *Engine) Detect(ctx context.Context, states []chronos.EntityState) []dom
 		all[i].ID = domain.PerceptionID(all[i])
 	}
 
+	stampRun(all)
+
+	if e.cfg.MaxSignalsPerRun > 0 && len(all) > e.cfg.MaxSignalsPerRun {
+		var dropped []domain.Signal
+		all, dropped = capFairly(all, e.cfg.MaxSignalsPerRun)
+		if e.metrics != nil {
+			for _, s := range dropped {
+				e.metrics.ObserveDetectorTruncated(string(s.Pattern))
+			}
+		}
+	}
+
 	sort.SliceStable(all, func(i, j int) bool {
 		if !all[i].DetectedAt.Equal(all[j].DetectedAt) {
 			return all[i].DetectedAt.After(all[j].DetectedAt)
 		}
 		return all[i].Confidence > all[j].Confidence
 	})
+	return all
+}
 
-	if e.cfg.MaxSignalsPerRun > 0 && len(all) > e.cfg.MaxSignalsPerRun {
-		if e.metrics != nil {
-			for _, s := range all[e.cfg.MaxSignalsPerRun:] {
-				e.metrics.ObserveDetectorTruncated(string(s.Pattern))
+// stampRun gives every signal from one Detect call the same DetectedAt:
+// the latest any detector recorded.
+//
+// Each detector stamps time.Now() as it runs, so within one call the
+// timestamps differ only by execution order -- microseconds of noise
+// that carry no information about the signals. They were nonetheless
+// the primary sort key ahead of the MaxSignalsPerRun cap, which meant
+// the detector registered last won every slot. When Oscillation,
+// Divergence and Convergence were appended to DefaultDetectors, that
+// silenced spike, drop, trend and change-point in production.
+//
+// PerceptionID does not hash DetectedAt, so identity and deduplication
+// are unaffected.
+func stampRun(sigs []domain.Signal) {
+	var runAt time.Time
+	for _, s := range sigs {
+		if s.DetectedAt.After(runAt) {
+			runAt = s.DetectedAt
+		}
+	}
+	for i := range sigs {
+		sigs[i].DetectedAt = runAt
+	}
+}
+
+// capFairly keeps at most limit signals, taking them round-robin across
+// patterns in a fixed order, and most confident first within each.
+//
+// The cap exists to bound memory -- an unlimited run was OOMKilled -- and
+// it is not a ranking across patterns. Truncating one confidence-sorted
+// list would let a detector that emits many signals at high confidence
+// starve one that emits few: pairwise detectors are O(N^2) in entities
+// and report confidence near 1, so across 67 entities they would take
+// every slot from the detectors that matter most for incident
+// prediction. Round-robin gives each pattern an equal claim, and a
+// pattern with fewer signals than its share keeps all of them while the
+// remainder goes to the patterns that can use it.
+//
+// Patterns are visited in lexical order and each group is sorted
+// stably, so the surviving set is deterministic for identical input.
+func capFairly(sigs []domain.Signal, limit int) (kept, dropped []domain.Signal) {
+	byPattern := make(map[domain.PatternType][]domain.Signal)
+	for _, s := range sigs {
+		byPattern[s.Pattern] = append(byPattern[s.Pattern], s)
+	}
+	patterns := make([]domain.PatternType, 0, len(byPattern))
+	for p, group := range byPattern {
+		patterns = append(patterns, p)
+		sort.SliceStable(group, func(i, j int) bool {
+			return group[i].Confidence > group[j].Confidence
+		})
+	}
+	sort.Slice(patterns, func(i, j int) bool { return patterns[i] < patterns[j] })
+
+	kept = make([]domain.Signal, 0, limit)
+	next := make(map[domain.PatternType]int, len(patterns))
+	for len(kept) < limit {
+		progressed := false
+		for _, p := range patterns {
+			if len(kept) == limit {
+				break
+			}
+			if i := next[p]; i < len(byPattern[p]) {
+				kept = append(kept, byPattern[p][i])
+				next[p] = i + 1
+				progressed = true
 			}
 		}
-		all = all[:e.cfg.MaxSignalsPerRun]
+		if !progressed {
+			break
+		}
 	}
-	return all
+	for _, p := range patterns {
+		dropped = append(dropped, byPattern[p][next[p]:]...)
+	}
+	return kept, dropped
 }
 
 func (e *Engine) runDetector(ctx context.Context, d Detector, scopeID uuid.UUID, states []chronos.EntityState) []domain.Signal {

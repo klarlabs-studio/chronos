@@ -6,6 +6,32 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Fixed
+- **The `MaxSignalsPerRun` cap no longer lets one detector silence the
+  others.** After 0.18.0 appended Oscillation, Divergence and
+  Convergence to `DefaultDetectors`, a production deployment capped at
+  200 persisted signals from those three and nothing else: spike, drop,
+  trend, change-point, recurrence and outlier-cluster went from 87
+  signals in the preceding fifteen minutes to zero for the next thirty.
+
+  Two defects compounded. Every detector stamps `DetectedAt` with the
+  wall clock as it runs, and the engine sorted on `DetectedAt` first, so
+  within one run the detector registered last carried the latest
+  timestamps and took every slot -- survival was decided by registration
+  order, not evidence. And even ordered by confidence, a single
+  truncated list lets a detector that emits many signals at high
+  confidence starve one that emits few: the pairwise detectors are
+  O(N^2) in entities and report confidence near 1 (0.989 and 0.983 on
+  average in that deployment, against 0.31-0.90 for the classic ones).
+
+  Now every signal from one `Detect` call shares a single `DetectedAt`,
+  and the cap takes signals round-robin across patterns, most confident
+  first within each. A pattern with fewer signals than its share keeps
+  all of them; the remainder goes to patterns that can use it. The cap
+  still bounds memory, which is what it is for. Output is returned
+  confidence-descending. Signal IDs are unchanged, since
+  `PerceptionID` does not hash `DetectedAt`.
+
 ## [0.19.0] - 2026-09-21
 
 ### Changed
