@@ -296,6 +296,8 @@ func (s *Scheduler) tick(ctx context.Context) {
 		s.logger.Error("scheduler: list scopes failed", "err", err)
 		return
 	}
+	started := time.Now()
+	var candidates, known, saved int
 	for _, scopeID := range scopes {
 		states, err := s.states.ListByScopeSince(ctx, scopeID, cutoff)
 		if err != nil {
@@ -305,16 +307,35 @@ func (s *Scheduler) tick(ctx context.Context) {
 		if len(states) == 0 {
 			continue
 		}
-		signals := s.engine.Detect(ctx, states)
-		for _, sig := range signals {
+		// Already-persisted signals are excluded before the engine applies
+		// MaxSignalsPerRun, not after: otherwise saved history that
+		// outranks new events fills every slot on every tick and the new
+		// events are truncated before they can be written.
+		signals := s.engine.DetectExcluding(ctx, states, func(sig domain.Signal) bool {
+			candidates++
 			if s.alreadyPersisted(ctx, sig) {
-				continue
+				known++
+				return true
 			}
+			return false
+		})
+		for _, sig := range signals {
 			if err := s.signals.Save(ctx, sig); err != nil {
 				s.logger.Error("scheduler: signal save failed", "scope_id", scopeID, "signal_id", sig.ID, "err", err)
+				continue
 			}
+			saved++
 		}
 	}
+	// One line per tick. "Is detection producing anything?" should be
+	// answerable from the log, not only by querying the store: a
+	// deployment once went silent for hours with every tick completing
+	// cleanly, and nothing here said so. candidates also shows what the
+	// duplicate check costs -- one indexed lookup per candidate.
+	s.logger.Info("scheduler: tick",
+		"scopes", len(scopes), "candidates", candidates, "known", known,
+		"novel", candidates-known, "saved", saved,
+		"duration", time.Since(started).Round(time.Millisecond))
 }
 
 // alreadyPersisted reports whether a signal with the same perception
