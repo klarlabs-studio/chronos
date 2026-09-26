@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-26
+
 ### Fixed
 - **The `MaxSignalsPerRun` cap no longer lets one detector silence the
   others.** After 0.18.0 appended Oscillation, Divergence and
