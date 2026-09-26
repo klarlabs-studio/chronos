@@ -10,7 +10,7 @@ These are the formal SLOs Chronos targets in production. Alerting rules in [`dep
 | HTTP p99 latency (read) | < 150 ms | 30 days, rolling | `chronos_http_request_duration_seconds_*` for `GET /v1/signals*` |
 | HTTP p99 latency (write) | < 250 ms | 30 days, rolling | same metric for `POST /v1/ingest` |
 | HTTP error rate | < 0.1 % | 30 days, rolling | `chronos_http_requests_total{status=~"5.."}` |
-| Signal-emission freshness | < 2 × `CHRONOS_DETECTION_INTERVAL` | 30 days, rolling | scheduler tick lag |
+| Signal-emission freshness | < 2 × `CHRONOS_DETECTION_INTERVAL` | 30 days, rolling | `time() - chronos_scheduler_last_tick_timestamp_seconds` |
 
 ## Error budgets
 
@@ -37,7 +37,7 @@ Webhook delivery failures are counted in `chronos_webhook_deliveries_total{statu
 
 ## Detector freshness
 
-The in-process detection scheduler ticks every `CHRONOS_DETECTION_INTERVAL`. A signal that should have been emitted at tick T must appear in the persistence layer by T + 2 × interval. Operators alerting on freshness should compare the latest `signals.detected_at` against `now - 2 × interval` and page if older.
+The in-process detection scheduler ticks every `CHRONOS_DETECTION_INTERVAL`. A signal that should have been emitted at tick T must appear in the persistence layer by T + 2 × interval. Operators alerting on freshness should alert on `time() - chronos_scheduler_last_tick_timestamp_seconds`, which keeps working when no signals are produced; the latest `signals.detected_at` cannot tell a stalled scheduler from a quiet fleet.
 
 This SLO does not apply to one-shot `chronos compute` invocations — those are batch operations whose latency is a function of dataset size.
 

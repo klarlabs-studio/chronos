@@ -166,7 +166,8 @@ func runServe(args []string) error {
 		sched := pipeline.NewScheduler(conn.EntityStates, signals, pipeline.NewEngine(cfg).WithMetrics(metrics), cfg.DetectionInterval, logger).
 			WithRetention(cfg.SignalRetention).
 			WithLookback(cfg.DetectionLookback).
-			WithSweepInterval(cfg.RetentionSweepInterval)
+			WithSweepInterval(cfg.RetentionSweepInterval).
+			WithMetrics(metrics)
 		go func() {
 			if err := sched.Run(rootCtx); err != nil {
 				logger.Error("scheduler exited with error", "err", err)

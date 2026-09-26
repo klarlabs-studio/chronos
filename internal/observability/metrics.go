@@ -44,6 +44,8 @@ type Metrics struct {
 	detectorSignals       map[labelKey]uint64
 	detectorSkips         map[labelKey]uint64
 	signalsTruncated      map[labelKey]uint64
+
+	scheduler schedulerHealth
 }
 
 // labelKey is a string in the form "k1=v1,k2=v2" with keys sorted
@@ -209,9 +211,12 @@ func (m *Metrics) Render(w io.Writer) error {
 		mapToSorted(m.detectorSkips)); err != nil {
 		return err
 	}
-	return writeFamily(w, "chronos_signals_truncated_total", "counter",
+	if err := writeFamily(w, "chronos_signals_truncated_total", "counter",
 		"Signals dropped by MaxSignalsPerRun after sort, labelled by pattern.",
-		mapToSorted(m.signalsTruncated))
+		mapToSorted(m.signalsTruncated)); err != nil {
+		return err
+	}
+	return m.renderScheduler(w)
 }
 
 // kvSample pairs a labelKey with a numeric value for rendering.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/felixgeelhaar/chronos/internal/detect"
 	"github.com/felixgeelhaar/chronos/internal/domain"
+	"github.com/felixgeelhaar/chronos/internal/observability"
 	"github.com/felixgeelhaar/chronos/internal/ports"
 )
 
@@ -34,6 +35,7 @@ type Scheduler struct {
 	lookback      time.Duration
 	sweepInterval time.Duration
 	logger        *slog.Logger
+	metrics       *observability.Metrics
 
 	// batchTimeout overrides retentionBatchTimeout; zero means the
 	// default. Unexported: it exists so tests can simulate a hung batch
@@ -59,6 +61,14 @@ func NewScheduler(states ports.EntityStateRepository, signals ports.SignalReposi
 		interval: interval,
 		logger:   logger,
 	}
+}
+
+// WithMetrics reports tick and retention health to m, so a stalled
+// scheduler is visible to Prometheus and not only in logs. nil disables
+// reporting.
+func (s *Scheduler) WithMetrics(m *observability.Metrics) *Scheduler {
+	s.metrics = m
+	return s
 }
 
 // WithRetention enables periodic deletion of signals older than d, and
@@ -287,6 +297,7 @@ func (s *Scheduler) checkRetention(ctx context.Context) {
 		s.logger.Error("scheduler: retention check failed", "err", err)
 		return
 	}
+	s.metrics.SetRetentionOverdue(n)
 	if n > 0 {
 		s.retentionBehind = true
 		s.logger.Warn("scheduler: retention is behind",
@@ -358,6 +369,7 @@ func (s *Scheduler) sweep(ctx context.Context) {
 			return
 		}
 		total += n
+		s.metrics.ObserveRetentionDeleted(n)
 
 		// Progress is logged per batch rather than only at the end. A
 		// first sweep over a large backlog is the one an operator most
@@ -379,6 +391,7 @@ func (s *Scheduler) sweep(ctx context.Context) {
 		default:
 		}
 	}
+	s.metrics.ObserveRetentionSweep(time.Now())
 	if total > 0 {
 		s.logger.Info("scheduler: pruned signals past retention", "deleted", total, "cutoff", cutoff)
 	}
@@ -411,7 +424,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		return
 	}
 	started := time.Now()
-	var candidates, known, saved int
+	var candidates, known, saved, failed int
 	for _, scopeID := range scopes {
 		states, err := s.states.ListByScopeSince(ctx, scopeID, cutoff)
 		if err != nil {
@@ -436,6 +449,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		for _, sig := range signals {
 			if err := s.signals.Save(ctx, sig); err != nil {
 				s.logger.Error("scheduler: signal save failed", "scope_id", scopeID, "signal_id", sig.ID, "err", err)
+				failed++
 				continue
 			}
 			saved++
@@ -450,6 +464,7 @@ func (s *Scheduler) tick(ctx context.Context) {
 		"scopes", len(scopes), "candidates", candidates, "known", known,
 		"novel", candidates-known, "saved", saved,
 		"duration", time.Since(started).Round(time.Millisecond))
+	s.metrics.ObserveTick(saved, failed, time.Now())
 }
 
 // alreadyPersisted reports whether a signal with the same perception
