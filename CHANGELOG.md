@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-09-27
+
 ### Fixed
 - **Spike and Drop no longer report thousands of sigma on a flat series
   (`spike-v3`, `drop-v3`).** z divided by the baseline's standard
