@@ -6,6 +6,8 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-27
+
 ### Fixed
 - **Cursor polls are bounded and page forward, so a consumer that falls
   behind catches up instead of stalling.** `since_cursor` returned every
