@@ -98,17 +98,59 @@ func TestDrop_NegativeDeviationEmits(t *testing.T) {
 	}
 }
 
-func TestSpike_ZeroVarianceSkipped(t *testing.T) {
-	// Constant baseline → stddev=0 → cannot compute z; must not panic
-	// and must not emit.
-	d := NewSpike(spikeCfg())
+func TestSpike_ZeroVarianceWithoutFloorSkipped(t *testing.T) {
+	// Floor disabled: a constant baseline has no spread to measure
+	// against, so there is no z -- must not panic and must not emit.
+	cfg := spikeCfg()
+	cfg.SpikeMinSpreadRatio = 0
+	d := NewSpike(cfg)
 	scope := uuid.New()
-	entity := uuid.New()
-	now := time.Now()
-	states := mkSeries(scope, entity, now, []float64{5, 5, 5, 5, 5, 100})
-	got := d.Detect(context.Background(), scope, states)
-	if len(got) != 0 {
+	states := mkSeries(scope, uuid.New(), time.Now(), []float64{5, 5, 5, 5, 5, 100})
+	if got := d.Detect(context.Background(), scope, states); len(got) != 0 {
 		t.Errorf("got %d signals on zero-variance baseline, want 0", len(got))
+	}
+}
+
+// With the spread floor a flat baseline has a scale, so a jump that is
+// large relative to the series is a spike rather than invisible.
+func TestSpike_FlatBaselineLargeJumpEmits(t *testing.T) {
+	cfg := spikeCfg()
+	cfg.SpikeMinSpreadRatio = 0.01
+	sig := detectOneSpike(t, cfg, []float64{5, 5, 5, 5, 5, 100})
+	if z := sig.Metrics["z"]; z < 2.5 {
+		t.Errorf("z = %v, want a spike", z)
+	}
+}
+
+// Production reported "1115.6 sigma above a baseline of 0.93 (SD 0.00)":
+// a series flat to float precision, so any wobble divided by a spread of
+// ~1e-5 became thousands of sigma, at top confidence. A move that is
+// small relative to the value must not be a spike.
+func TestSpike_NearlyFlatBaselineTinyMoveIsNotASpike(t *testing.T) {
+	cfg := spikeCfg()
+	cfg.SpikeMinSpreadRatio = 0.01
+	d := NewSpike(cfg)
+	scope := uuid.New()
+	ys := []float64{0.93, 0.93001, 0.92999, 0.93, 0.93001, 0.935}
+	if got := d.Detect(context.Background(), scope, mkSeries(scope, uuid.New(), time.Now(), ys)); len(got) != 0 {
+		t.Fatalf("a 0.5%% move on a flat 0.93 series emitted %d spikes (z=%v)", len(got), got[0].Metrics["z"])
+	}
+}
+
+// The floor bounds z, so the reported number means something.
+func TestSpike_FloorBoundsReportedZ(t *testing.T) {
+	cfg := spikeCfg()
+	cfg.SpikeMinSpreadRatio = 0.01
+	sig := detectOneSpike(t, cfg, []float64{0.93, 0.93001, 0.92999, 0.93, 0.93001, 0.98})
+	// (0.98-0.93)/(0.01*0.98) is about 5.1; without the floor it was ~5000.
+	if z := sig.Metrics["z"]; z > 10 {
+		t.Errorf("z = %v; the spread floor must bound it", z)
+	}
+	if sig.Metrics["baseline_stddev"] >= 0.001 {
+		t.Errorf("baseline_stddev must stay the measured spread, got %v", sig.Metrics["baseline_stddev"])
+	}
+	if sig.Metrics["effective_stddev"] <= sig.Metrics["baseline_stddev"] {
+		t.Errorf("effective_stddev %v must report the floored spread used for z", sig.Metrics["effective_stddev"])
 	}
 }
 

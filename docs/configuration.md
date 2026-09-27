@@ -17,6 +17,7 @@ Chronos is configured exclusively through `CHRONOS_*` environment variables. The
 | `CHRONOS_TREND_MIN_POINTS` | `4` | Trend (Tier B) | Minimum observations to consider a trend. |
 | `CHRONOS_SPIKE_Z` | `2.5` | Spike (Tier B) | Absolute z-score threshold for a spike. |
 | `CHRONOS_DROP_Z` | `2.5` | Drop (Tier B) | Absolute z-score threshold for a drop. |
+| `CHRONOS_SPIKE_MIN_SPREAD_RATIO` | `0.01` | Spike/Drop (Tier B) | Floor on the baseline spread, as a fraction of the series scale. Stops a near-flat baseline turning a tiny wobble into an extreme z. `0` disables. |
 | `CHRONOS_SPIKE_WINDOW` | `5` | Spike/Drop (Tier B) | Rolling baseline size in points. |
 | `CHRONOS_STALL_MAX_STDDEV` | `0.05` | Stall | Max stddev of normalised outcome to qualify. |
 | `CHRONOS_STALL_MIN_POINTS` | `4` | Stall | Minimum observations to qualify. |

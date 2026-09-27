@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -47,6 +48,11 @@ type Config struct {
 	SpikeZScore float64 // Absolute z-score for a positive deviation
 	DropZScore  float64 // Absolute z-score for a negative deviation
 	SpikeWindow int     // Window size (in points) for the rolling baseline
+	// SpikeMinSpreadRatio floors the baseline spread used for z at this
+	// fraction of the series scale (max of |baseline mean| and |latest|).
+	// A series flat to float precision otherwise turns any wobble into
+	// thousands of sigma. 0 disables the floor.
+	SpikeMinSpreadRatio float64
 
 	// Detection — Stall (Tier B)
 	StallMaxStdDev float64 // Maximum stddev of normalised outcome to qualify as stalled
@@ -233,9 +239,10 @@ func Default() *Config {
 		TrendMinSlope:  defaultEnvFloat64("CHRONOS_TREND_MIN_SLOPE", 0.05),
 		TrendMinPoints: defaultEnvInt("CHRONOS_TREND_MIN_POINTS", 4),
 
-		SpikeZScore: defaultEnvFloat64("CHRONOS_SPIKE_Z", 2.5),
-		DropZScore:  defaultEnvFloat64("CHRONOS_DROP_Z", 2.5),
-		SpikeWindow: defaultEnvInt("CHRONOS_SPIKE_WINDOW", 5),
+		SpikeZScore:         defaultEnvFloat64("CHRONOS_SPIKE_Z", 2.5),
+		DropZScore:          defaultEnvFloat64("CHRONOS_DROP_Z", 2.5),
+		SpikeWindow:         defaultEnvInt("CHRONOS_SPIKE_WINDOW", 5),
+		SpikeMinSpreadRatio: defaultEnvFloat64("CHRONOS_SPIKE_MIN_SPREAD_RATIO", 0.01),
 
 		StallMaxStdDev: defaultEnvFloat64("CHRONOS_STALL_MAX_STDDEV", 0.05),
 		StallMinPoints: defaultEnvInt("CHRONOS_STALL_MIN_POINTS", 4),
@@ -319,6 +326,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MinSampleSize < 1 {
 		return fmt.Errorf("min sample size must be at least 1, got %d", c.MinSampleSize)
+	}
+	if c.SpikeMinSpreadRatio < 0 || !isFiniteFloat(c.SpikeMinSpreadRatio) {
+		return fmt.Errorf("spike min spread ratio must be a finite value >= 0, got %v", c.SpikeMinSpreadRatio)
 	}
 	if c.SpikeZScore < 0 {
 		return fmt.Errorf("spike z-score must be >= 0, got %f", c.SpikeZScore)
@@ -459,3 +469,5 @@ func defaultEnvBool(key string, fallback bool) bool {
 	}
 	return fallback
 }
+
+func isFiniteFloat(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }

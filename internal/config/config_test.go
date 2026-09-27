@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,8 @@ func TestValidate_RejectsEachInvariant(t *testing.T) {
 		{"sim > 1", func(c *Config) { c.SimilarityThreshold = 1.1 }, "similarity"},
 		{"sample size < 1", func(c *Config) { c.MinSampleSize = 0 }, "sample size"},
 		{"spike z < 0", func(c *Config) { c.SpikeZScore = -1 }, "spike z-score"},
+		{"spike min spread ratio < 0", func(c *Config) { c.SpikeMinSpreadRatio = -0.01 }, "spike min spread ratio"},
+		{"spike min spread ratio NaN", func(c *Config) { c.SpikeMinSpreadRatio = math.NaN() }, "spike min spread ratio"},
 		{"drop z < 0", func(c *Config) { c.DropZScore = -1 }, "drop z-score"},
 		{"stall stddev < 0", func(c *Config) { c.StallMaxStdDev = -0.1 }, "stall max stddev"},
 		{"anomaly sim out of range high", func(c *Config) { c.AnomalyMaxSimilarity = 1.5 }, "anomaly max similarity"},
