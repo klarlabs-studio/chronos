@@ -131,11 +131,7 @@ func (r *SignalRepository) attachEvidence(ctx context.Context, signals []domain.
 			placeholders[i] = "?"
 			args[i] = sig.ID.String()
 		}
-		rows, err := r.conn.DB.QueryContext(ctx, `
-			SELECT signal_id, series_id, time, kind, score, metrics
-			FROM signal_evidence
-			WHERE signal_id IN (`+strings.Join(placeholders, ",")+`)
-			ORDER BY signal_id, score DESC`, args...)
+		rows, err := r.conn.DB.QueryContext(ctx, evidenceForSignalsQuery(placeholders), args...)
 		if err != nil {
 			return fmt.Errorf("signal evidence: %w", err)
 		}
@@ -486,4 +482,13 @@ func encodeMetrics(m map[string]float64) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// evidenceForSignalsQuery selects the evidence of several signals. The
+// placeholders are generated bind markers, never caller input.
+func evidenceForSignalsQuery(placeholders []string) string {
+	return `SELECT signal_id, series_id, time, kind, score, metrics
+		FROM signal_evidence
+		WHERE signal_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY signal_id, score DESC`
 }
