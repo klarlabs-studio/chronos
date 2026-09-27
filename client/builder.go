@@ -24,6 +24,7 @@ type SignalQuery struct {
 	minConfidence *float64
 	limit         int
 	sinceCursor   string
+	ascending     bool
 }
 
 // Scope filters by a single scope ID. Required for List unless Scopes
@@ -84,6 +85,13 @@ func (q *SignalQuery) SinceCursor(token string) *SignalQuery {
 	return q
 }
 
+// Ascending pages oldest first from Since, like a SinceCursor query does,
+// so a consumer's first poll is bounded before it has a cursor.
+func (q *SignalQuery) Ascending() *SignalQuery {
+	q.ascending = true
+	return q
+}
+
 func (q *SignalQuery) queryValues() (url.Values, error) {
 	if q.scope == uuid.Nil && len(q.scopes) == 0 {
 		return nil, errors.New("chronos client: Scope or Scopes is required")
@@ -122,6 +130,9 @@ func (q *SignalQuery) queryValues() (url.Values, error) {
 	}
 	if q.sinceCursor != "" {
 		v.Set("since_cursor", q.sinceCursor)
+	}
+	if q.ascending {
+		v.Set("order", "asc")
 	}
 	return v, nil
 }

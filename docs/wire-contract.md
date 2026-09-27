@@ -17,6 +17,12 @@ Adding a new transport without updating this document is a contract bug.
 
 gRPC RPCs match the HTTP surface additively: unary `Ingest` + `IngestBatch`, `ListSignals` (including `since_cursor` / `next_cursor`), `GetSignal`, server-streaming `StreamSignals` (frames are `StreamSignalsResponse`, not bare `Signal`, so the type stays unique from `GetSignal`), `ValidateConfig`, and `ExportFederation`. Unary `Ingest` was not changed to client-streaming.
 
+### Polling signals by cursor
+
+`since_cursor` pages **forward**: signals strictly after the cursor in (`detected_at`, `id`) order, **oldest first**, at most `limit` (500 when unset, 1000 max). `next_cursor` points at the **last** signal of the page and is absent on an empty page, so a caller keeps its position when nothing is new. HTTP also returns `has_more` (a full page — poll again now); gRPC callers read `count == limit` the same way. `order=asc` (HTTP) pages forward from `since` the same way for a first poll that has no cursor yet. Without a cursor or `order=asc`, `/v1/signals` is unchanged: newest first, unbounded unless `limit` is set, `next_cursor` at the newest row.
+
+Before 0.25.0 a cursor returned every signal since itself, newest first. A consumer that fell behind asked for its entire backlog on every poll; see the changelog.
+
 ## Explanation
 
 `Signal.Explanation` is numeric/structured context so downstream narrators can say *why* a detector fired without Chronos emitting prose. Detectors populate it; empty/`omit` means the detector did not surface one (legacy rows). Fields:

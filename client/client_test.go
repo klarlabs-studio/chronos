@@ -248,3 +248,22 @@ func TestSignalQuery_RequiresScope(t *testing.T) {
 		t.Errorf("expected error for missing scope")
 	}
 }
+
+func TestSignalQuery_AscendingSendsOrderAndReadsHasMore(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("order"); got != "asc" {
+			t.Errorf("order = %q, want asc", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"count": 0, "signals": []client.Signal{}, "has_more": true})
+	}))
+	defer srv.Close()
+
+	c, _ := client.New(srv.URL)
+	page, err := c.Signals().Scope(uuid.New()).Since(time.Now().Add(-time.Hour)).Ascending().ListPage(context.Background())
+	if err != nil {
+		t.Fatalf("ListPage: %v", err)
+	}
+	if !page.HasMore {
+		t.Fatal("HasMore not decoded")
+	}
+}

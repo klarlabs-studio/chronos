@@ -89,10 +89,16 @@ type IngestBatchResponse struct {
 
 // SignalPage is one page of /v1/signals, including the opaque cursor
 // for the next poll. NextCursor is empty when the page is empty.
+//
+// A SinceCursor or Ascending query pages oldest first, at most 500
+// signals unless Limit says otherwise (1000 at most). HasMore reports a
+// full page: poll again with NextCursor straight away rather than
+// waiting for the next interval.
 type SignalPage struct {
 	Signals    []Signal `json:"signals"`
 	Count      int      `json:"count"`
 	NextCursor string   `json:"next_cursor,omitempty"`
+	HasMore    bool     `json:"has_more,omitempty"`
 }
 
 // FederationExport is the anonymized pattern-statistics payload from

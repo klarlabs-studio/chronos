@@ -138,9 +138,33 @@ type SignalFilter struct {
 	// not an identity, so a partial window is not expressible.
 	Window *domain.TimeWindow
 
+	// After, when set, pages forward: only signals strictly after the
+	// cursor in (DetectedAt, ID) order, returned oldest first, with Limit
+	// applied after the cursor. Pass the last signal of one page as the
+	// cursor for the next. A zero ID positions the cursor before every
+	// signal detected at DetectedAt.
+	//
+	// ID breaks ties because they are the common case, not an edge: the
+	// scheduler stamps every signal of one run with the same DetectedAt.
+	After *SignalCursor
+
+	// Ascending returns oldest first instead of newest first. It is
+	// implied by After; set it alone to page forward from Since.
+	Ascending bool
+
 	// Limit caps the number of returned signals; 0 means no limit.
 	Limit int
 }
+
+// SignalCursor is a position in (DetectedAt, ID) order. See
+// SignalFilter.After.
+type SignalCursor struct {
+	DetectedAt time.Time
+	ID         uuid.UUID
+}
+
+// Forward reports whether the filter pages oldest first.
+func (f SignalFilter) Forward() bool { return f.After != nil || f.Ascending }
 
 // Capability interfaces — optional features a provider may advertise.
 //

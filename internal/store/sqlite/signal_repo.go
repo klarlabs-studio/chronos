@@ -104,14 +104,70 @@ func (r *SignalRepository) List(ctx context.Context, filter ports.SignalFilter) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("signal list: %w", err)
 	}
-	for i := range out {
-		ev, err := r.loadEvidence(ctx, out[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		out[i].Evidence = ev
+	if err := r.attachEvidence(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// evidenceIDsPerQuery bounds the signal ids in one evidence lookup, under
+// SQLite's default 32766 host parameters.
+const evidenceIDsPerQuery = 500
+
+// attachEvidence loads the evidence for a page of signals in a query per
+// evidenceIDsPerQuery signals rather than one per signal. Cheap in-process,
+// but libsql may be remote, where a round trip per signal is what made a
+// large page unservable on the SQL backends.
+func (r *SignalRepository) attachEvidence(ctx context.Context, signals []domain.Signal) error {
+	index := make(map[string]int, len(signals))
+	for i := range signals {
+		index[signals[i].ID.String()] = i
+	}
+	for start := 0; start < len(signals); start += evidenceIDsPerQuery {
+		chunk := signals[start:min(start+evidenceIDsPerQuery, len(signals))]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for i, sig := range chunk {
+			placeholders[i] = "?"
+			args[i] = sig.ID.String()
+		}
+		rows, err := r.conn.DB.QueryContext(ctx, evidenceForSignalsQuery(placeholders), args...)
+		if err != nil {
+			return fmt.Errorf("signal evidence: %w", err)
+		}
+		if err := scanEvidenceInto(rows, signals, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scanEvidenceInto(rows *sql.Rows, signals []domain.Signal, index map[string]int) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var owner, seriesStr, timeStr, kind string
+		var score float64
+		var metrics sql.NullString
+		if err := rows.Scan(&owner, &seriesStr, &timeStr, &kind, &score, &metrics); err != nil {
+			return fmt.Errorf("scan evidence: %w", err)
+		}
+		series, err := uuid.Parse(seriesStr)
+		if err != nil {
+			return fmt.Errorf("decode evidence series: %w", err)
+		}
+		t, err := parseTime(timeStr)
+		if err != nil {
+			return fmt.Errorf("decode evidence time: %w", err)
+		}
+		e := domain.Evidence{Series: series, Time: t, Kind: kind, Score: score}
+		if metrics.Valid && metrics.String != "" {
+			_ = json.Unmarshal([]byte(metrics.String), &e.Metrics)
+		}
+		if i, ok := index[owner]; ok {
+			signals[i].Evidence = append(signals[i].Evidence, e)
+		}
+	}
+	return rows.Err()
 }
 
 // Get returns a single signal by ID, including its evidence.
@@ -214,6 +270,9 @@ func buildListQuery(f ports.SignalFilter) (string, []any) {
 	const base = `SELECT id, scope_id, series_id, pattern, detected_at, window_start, window_end, strength, confidence, metrics, explanation, confidence_class FROM signals`
 	where, args := buildWhere(f)
 	q := base + where + " ORDER BY detected_at DESC, confidence DESC"
+	if f.Forward() {
+		q = base + where + " ORDER BY detected_at ASC, id ASC"
+	}
 	if f.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", f.Limit)
 	}
@@ -264,6 +323,11 @@ func buildWhere(f ports.SignalFilter) (string, []any) {
 	if f.Window != nil {
 		clauses = append(clauses, "window_start = ?", "window_end = ?")
 		args = append(args, formatTime(f.Window.Start), formatTime(f.Window.End))
+	}
+	if f.After != nil {
+		at := formatTime(f.After.DetectedAt)
+		clauses = append(clauses, "(detected_at > ? OR (detected_at = ? AND id > ?))")
+		args = append(args, at, at, f.After.ID.String())
 	}
 	if len(clauses) == 0 {
 		return "", args
@@ -418,4 +482,13 @@ func encodeMetrics(m map[string]float64) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+// evidenceForSignalsQuery selects the evidence of several signals. The
+// placeholders are generated bind markers, never caller input.
+func evidenceForSignalsQuery(placeholders []string) string {
+	return `SELECT signal_id, series_id, time, kind, score, metrics
+		FROM signal_evidence
+		WHERE signal_id IN (` + strings.Join(placeholders, ",") + `)
+		ORDER BY signal_id, score DESC`
 }

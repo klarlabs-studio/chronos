@@ -6,6 +6,33 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Fixed
+- **Cursor polls are bounded and page forward, so a consumer that falls
+  behind catches up instead of stalling.** `since_cursor` returned every
+  signal since the cursor, newest first, and loaded each signal's
+  evidence with its own query. On 2026-09-27 Vorhut's cursor fell behind
+  at 02:37; from then on every poll asked for the whole backlog (~48k
+  signals, ~48k evidence queries), hit the client's 30 s timeout, and
+  never advanced the cursor. Detection ran normally throughout, but no
+  signal reached the consumer for 9.5 hours. A cursor page is now oldest
+  first, strictly after the cursor in (`detected_at`, `id`) order, at
+  most 500 signals by default (1000 max), with `next_cursor` at the last
+  row and `has_more` on HTTP. Ties at one timestamp — every signal of a
+  detection run shares one — page without loss or repetition, pinned for
+  all five stores by the conformance group `Signal/CursorPaging`.
+  **Behaviour change:** cursor responses are now ascending. The cursor
+  token format is unchanged, so an existing poller keeps working and
+  drains its backlog one page per poll.
+- **Listing signals loads evidence in one query per 1000 signals**
+  (500 on SQLite/libsql) instead of one per signal, on every SQL store.
+
+### Added
+- `order=asc` on `GET /v1/signals` and `SignalQuery.Ascending()` in the
+  Go client: page forward from `since`, for a first poll without a
+  cursor. `SignalPage.HasMore` exposes `has_more`.
+- `ports.SignalFilter.After` / `ports.SignalCursor` and
+  `SignalFilter.Ascending` for embedders.
+
 ## [0.24.0] - 2026-09-26
 
 ### Added

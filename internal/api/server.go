@@ -225,20 +225,15 @@ func (s *Server) handleSignals(w http.ResponseWriter, r *http.Request) {
 
 	// Decode the cursor before calling the repository so a malformed
 	// token fails fast rather than running the query first.
-	var cursor *signalCursor
 	if token := r.URL.Query().Get("since_cursor"); token != "" {
 		c, err := decodeSignalCursor(token)
 		if err != nil {
 			http.Error(w, "invalid since_cursor: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		cursor = &c
-		// Setting Since = cursor.DetectedAt keeps the repository
-		// query cheap (it gets a SQL-level filter). The exact-
-		// timestamp tie-break runs in-handler below so the port
-		// contract stays unchanged.
-		filter.Since = &c.DetectedAt
+		filter.After = &ports.SignalCursor{DetectedAt: c.DetectedAt, ID: c.ID}
 	}
+	pageForward(&filter)
 
 	signals, err := s.signals.List(r.Context(), filter)
 	if err != nil {
@@ -247,39 +242,63 @@ func (s *Server) handleSignals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In-handler cursor tie-break: drop rows that aren't strictly
-	// after the cursor in (detected_at, id) lex order. Repositories
-	// already filter detected_at >= cursor.DetectedAt, so the only
-	// rows we still need to skip are those at the exact cursor
-	// timestamp with id <= cursor.ID.
-	if cursor != nil {
-		kept := signals[:0]
-		for _, sig := range signals {
-			if sig.DetectedAt.Equal(cursor.DetectedAt) && sig.ID.String() <= cursor.ID.String() {
-				continue
-			}
-			kept = append(kept, sig)
-		}
-		signals = kept
-	}
-
 	dtos := make([]SignalDTO, 0, len(signals))
 	for _, sig := range signals {
 		dtos = append(dtos, ToSignalDTO(sig))
 	}
 
 	body := map[string]any{"signals": dtos, "count": len(dtos)}
-	// next_cursor points at the newest signal in the response so the
-	// next poll resumes strictly after it. Repos return DESC by
-	// detected_at, so signals[0] is the newest. Omit when empty so
-	// clients can detect "nothing new" without a sentinel.
-	if len(signals) > 0 {
-		body["next_cursor"] = encodeSignalCursor(signalCursor{
-			DetectedAt: signals[0].DetectedAt,
-			ID:         signals[0].ID,
-		})
+	if cursorAt, ok := nextCursor(filter, signals); ok {
+		body["next_cursor"] = encodeSignalCursor(signalCursor{DetectedAt: cursorAt.DetectedAt, ID: cursorAt.ID})
+	}
+	if filter.Forward() {
+		body["has_more"] = len(signals) == filter.Limit
 	}
 	respondJSON(w, http.StatusOK, body)
+}
+
+// Forward pages (a since_cursor, or order=asc) are bounded even when the
+// caller sends no limit. An unbounded cursor read is what took Vorhut's
+// detection feed down on 2026-09-27: its cursor fell 48k signals behind,
+// every poll asked for all of them and timed out, and a failed poll never
+// advances a cursor.
+const (
+	defaultPageLimit = 500
+	maxPageLimit     = 1000
+)
+
+// PageForward bounds a forward page; shared with the gRPC transport so
+// both page identically.
+func PageForward(f *ports.SignalFilter) { pageForward(f) }
+
+// NextCursor is the shared resume position; see nextCursor.
+func NextCursor(f ports.SignalFilter, signals []domain.Signal) (ports.SignalCursor, bool) {
+	return nextCursor(f, signals)
+}
+
+func pageForward(f *ports.SignalFilter) {
+	if !f.Forward() {
+		return
+	}
+	if f.Limit <= 0 {
+		f.Limit = defaultPageLimit
+	}
+	f.Limit = min(f.Limit, maxPageLimit)
+}
+
+// nextCursor is where the next poll resumes: after the last row of a
+// forward page, or after the newest row of a newest-first list. It is
+// absent for an empty page, so a caller keeps its position when nothing
+// is new.
+func nextCursor(f ports.SignalFilter, signals []domain.Signal) (ports.SignalCursor, bool) {
+	if len(signals) == 0 {
+		return ports.SignalCursor{}, false
+	}
+	at := signals[0]
+	if f.Forward() {
+		at = signals[len(signals)-1]
+	}
+	return ports.SignalCursor{DetectedAt: at.DetectedAt, ID: at.ID}, true
 }
 
 // handleStream is the Server-Sent Events feed for newly-detected
@@ -561,6 +580,13 @@ func parseSignalFilter(r *http.Request) (ports.SignalFilter, error) {
 			return ports.SignalFilter{}, errors.New("invalid limit")
 		}
 		f.Limit = n
+	}
+	switch q.Get("order") {
+	case "", "desc":
+	case "asc":
+		f.Ascending = true
+	default:
+		return ports.SignalFilter{}, errors.New("invalid order: want asc or desc")
 	}
 	return f, nil
 }
