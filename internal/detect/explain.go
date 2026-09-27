@@ -11,8 +11,8 @@ import (
 const (
 	detectorVersionRecurrence            = "recurrence-v2"
 	detectorVersionTrend                 = "trend-v2"
-	detectorVersionSpike                 = "spike-v2"
-	detectorVersionDrop                  = "drop-v2"
+	detectorVersionSpike                 = "spike-v3"
+	detectorVersionDrop                  = "drop-v3"
 	detectorVersionStall                 = "stall-v1"
 	detectorVersionAnomaly               = "anomaly-v1"
 	detectorVersionSeasonality           = "seasonality-v2"

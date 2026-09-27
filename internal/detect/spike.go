@@ -86,10 +86,14 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 		// A baseline whose sum overflowed to ±Inf has an infinite
 		// mean and a NaN spread: there is no scale to measure the
 		// latest point against, so there is no deviation to report.
-		if sd == 0 || !isFinite(sd) || !isFinite(m) {
+		if !isFinite(sd) || !isFinite(m) {
 			continue
 		}
-		z := (last.Outcome() - m) / sd
+		spread := effectiveSpread(sd, m, last.Outcome(), cfg)
+		if spread == 0 {
+			continue
+		}
+		z := (last.Outcome() - m) / spread
 		if !isFinite(z) {
 			continue
 		}
@@ -97,7 +101,7 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 			continue
 		}
 		strength := clamp01(math.Abs(z) / 5.0)
-		confidence := baselineConfidence(len(observations), window+1, m, sd, z, threshold, cfg)
+		confidence := baselineConfidence(len(observations), window+1, m, spread, z, threshold, cfg)
 		windowStates := append(append([]chronos.EntityState{}, baselineStates...), last)
 		signals = append(signals, domain.Signal{
 			ID:              uuid.New(),
@@ -114,6 +118,7 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 				"z":                z,
 				"baseline_mean":    m,
 				"baseline_stddev":  sd,
+				"effective_stddev": spread,
 				"observed_outcome": last.Outcome(),
 				"window":           float64(window),
 			},
@@ -131,6 +136,22 @@ func zScoreSignal(scopeID uuid.UUID, states []chronos.EntityState, window int, t
 		})
 	}
 	return keepValid(signals)
+}
+
+// effectiveSpread is the spread z is measured against: the baseline's
+// standard deviation, floored at SpikeMinSpreadRatio of the series scale
+// (the larger of |baseline mean| and |latest|). A baseline flat to float
+// precision has a spread near 1e-5, which turned a 0.01 wobble into
+// "1115.6 sigma" at top confidence in production. Returns 0 when there is
+// no scale at all (a zero spread with the floor disabled, or an all-zero
+// series).
+func effectiveSpread(sd, baselineMean, latest float64, cfg *config.Config) float64 {
+	ratio := 0.0
+	if cfg != nil {
+		ratio = cfg.SpikeMinSpreadRatio
+	}
+	floor := ratio * math.Max(math.Abs(baselineMean), math.Abs(latest))
+	return math.Max(sd, floor)
 }
 
 const (

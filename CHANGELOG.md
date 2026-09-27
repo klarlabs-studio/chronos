@@ -6,6 +6,21 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+### Fixed
+- **Spike and Drop no longer report thousands of sigma on a flat series
+  (`spike-v3`, `drop-v3`).** z divided by the baseline's standard
+  deviation, and only an exactly-zero spread was skipped. A series flat
+  to float precision -- common for a bounded health score -- has a spread
+  near 1e-5, so a 0.01 wobble became "1115.6 sigma above a baseline of
+  0.93 (SD 0.00)" in production, at top confidence because the quietness
+  term rewards a tiny spread. The spread is now floored at
+  `CHRONOS_SPIKE_MIN_SPREAD_RATIO` (default 0.01) of the series scale,
+  max(|baseline mean|, |latest|); `z` and confidence use it, and the new
+  metric `effective_stddev` reports it while `baseline_stddev` stays the
+  measured spread. Consequence: a perfectly flat baseline followed by a
+  jump that is large relative to the series is now reported as a spike
+  instead of skipped. Set the ratio to 0 for the previous behaviour.
+
 ## [0.25.0] - 2026-09-27
 
 ### Fixed

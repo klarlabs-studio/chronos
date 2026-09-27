@@ -35,7 +35,7 @@ Before 0.25.0 a cursor returned every signal since itself, newest first. A consu
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v2`, `trend-v2`, `spike-v2`, `drop-v2`, `stall-v1`, `anomaly-v1`, `seasonality-v2`, `correlation-v2`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v2`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
+Current `detector_version` values: `recurrence-v2`, `trend-v2`, `spike-v3`, `drop-v3`, `stall-v1`, `anomaly-v1`, `seasonality-v2`, `correlation-v2`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v2`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
 
 Which detectors treat time as order, as a rate, as a join, or as a period is in [`temporal-semantics.md`](temporal-semantics.md).
 
@@ -132,14 +132,15 @@ Spike and Drop share the same evidence shape; sign of `z` distinguishes them.
 - **Evidence.Kind**: `baseline_deviation` — exactly one per signal.
 - **Evidence.Score**: `|z|`.
 - **Evidence.Metrics**:
-  - `z` — z-score of the latest outcome against the rolling baseline (signed).
+  - `z` — z-score of the latest outcome against the rolling baseline (signed), measured against `effective_stddev`.
   - `baseline_mean` — mean of the previous `SpikeWindow` outcomes.
   - `baseline_stddev` — sample stddev of the baseline.
 - **Signal.Metrics** *(superset of evidence)*:
   - `z`, `baseline_mean`, `baseline_stddev` — same as evidence.
+  - `effective_stddev` — the spread `z` is measured against: `baseline_stddev`, floored at `CHRONOS_SPIKE_MIN_SPREAD_RATIO` (default 0.01) of the series scale, max(|`baseline_mean`|, |`observed_outcome`|). Added in `spike-v3` / `drop-v3`.
   - `observed_outcome` — the latest outcome value.
   - `window` — `SpikeWindow` size (number of baseline points).
-- **Confidence**: quality of the evidence, not the size of the deviation. `support × quietness × margin` — see [`architecture.md`](architecture.md) for the terms. It is flat in `|z|` once the deviation is 25% past the trigger threshold, so consumers ranking by *how big* a spike was must read `strength` (or `z`), not `confidence`. Emitted values changed in `spike-v2` / `drop-v2`; the same input produces a lower number than it did under `spike-v1` / `drop-v1`, where confidence was a copy of strength.
+- **Confidence**: quality of the evidence, not the size of the deviation. `support × quietness × margin` — see [`architecture.md`](architecture.md) for the terms. It is flat in `|z|` once the deviation is 25% past the trigger threshold, so consumers ranking by *how big* a spike was must read `strength` (or `z`), not `confidence`. Emitted values changed in `spike-v2` / `drop-v2`; the same input produces a lower number than it did under `spike-v1` / `drop-v1`, where confidence was a copy of strength. In `spike-v3` / `drop-v3` both `z` and confidence use `effective_stddev`: a baseline flat to float precision no longer yields thousands of sigma at top confidence, and a perfectly flat baseline followed by a jump large relative to the series is now a spike rather than skipped.
 
 ### Stall — `Pattern: "stall"`
 
