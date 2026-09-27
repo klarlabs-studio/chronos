@@ -118,14 +118,69 @@ func (r *SignalRepository) List(ctx context.Context, filter ports.SignalFilter) 
 	if err != nil {
 		return nil, err
 	}
-	for i := range signals {
-		ev, err := r.loadEvidence(ctx, signals[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		signals[i].Evidence = ev
+	if err := r.attachEvidence(ctx, signals); err != nil {
+		return nil, err
 	}
 	return signals, nil
+}
+
+// evidenceIDsPerQuery bounds the signal ids in one evidence lookup, well
+// under PostgreSQL's 65535 bind parameters.
+const evidenceIDsPerQuery = 1000
+
+// attachEvidence loads the evidence for a page of signals in a query per
+// evidenceIDsPerQuery signals, not a query per signal. Per-signal loading
+// made a 48k-signal cursor page 48k round trips: every poll ran into the
+// client's 30s timeout, the cursor never advanced, and the consumer
+// stopped receiving detections for hours while detection itself ran fine.
+func (r *SignalRepository) attachEvidence(ctx context.Context, signals []domain.Signal) error {
+	index := make(map[uuid.UUID]int, len(signals))
+	for i := range signals {
+		index[signals[i].ID] = i
+	}
+	for start := 0; start < len(signals); start += evidenceIDsPerQuery {
+		chunk := signals[start:min(start+evidenceIDsPerQuery, len(signals))]
+		placeholders := make([]string, len(chunk))
+		args := make([]any, len(chunk))
+		for i, sig := range chunk {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args[i] = sig.ID
+		}
+		rows, err := r.conn.DB.QueryContext(ctx, `
+			SELECT signal_id, series_id, time, kind, score, metrics
+			FROM signal_evidence
+			WHERE signal_id IN (`+strings.Join(placeholders, ",")+`)
+			ORDER BY signal_id, score DESC`, args...)
+		if err != nil {
+			return fmt.Errorf("signal evidence: %w", err)
+		}
+		if err := scanEvidenceInto(rows, signals, index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func scanEvidenceInto(rows *sql.Rows, signals []domain.Signal, index map[uuid.UUID]int) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			owner   uuid.UUID
+			e       domain.Evidence
+			metrics []byte
+		)
+		if err := rows.Scan(&owner, &e.Series, &e.Time, &e.Kind, &e.Score, &metrics); err != nil {
+			return fmt.Errorf("scan evidence: %w", err)
+		}
+		e.Time = e.Time.UTC()
+		if len(metrics) > 0 {
+			_ = json.Unmarshal(metrics, &e.Metrics)
+		}
+		if i, ok := index[owner]; ok {
+			signals[i].Evidence = append(signals[i].Evidence, e)
+		}
+	}
+	return rows.Err()
 }
 
 // Get returns a single signal by ID, including its evidence.
@@ -213,6 +268,9 @@ func buildListQuery(f ports.SignalFilter) (string, []any) {
 	const base = `SELECT id, scope_id, series_id, pattern, detected_at, window_start, window_end, strength, confidence, metrics, explanation, confidence_class FROM signals`
 	where, args := buildWhere(f)
 	q := base + where + " ORDER BY detected_at DESC, confidence DESC"
+	if f.Forward() {
+		q = base + where + " ORDER BY detected_at ASC, id ASC"
+	}
 	if f.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", f.Limit)
 	}
@@ -261,6 +319,10 @@ func buildWhere(f ports.SignalFilter) (string, []any) {
 	if f.Window != nil {
 		add("window_start =", f.Window.Start)
 		add("window_end =", f.Window.End)
+	}
+	if f.After != nil {
+		args = append(args, f.After.DetectedAt, f.After.ID)
+		clauses = append(clauses, fmt.Sprintf("(detected_at, id) > ($%d, $%d)", len(args)-1, len(args)))
 	}
 	if len(clauses) == 0 {
 		return "", args

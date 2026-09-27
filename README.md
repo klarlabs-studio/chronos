@@ -328,7 +328,7 @@ POST /v1/ingest                           Stream a single observation
 POST /v1/ingest/batch                     Batch observations (up to 1000)
 POST /v1/config/validate                  Dry-run a candidate env-var map
 GET  /v1/federation/export                Opt-in anonymized pattern statistics
-GET  /v1/signals                          List signals (filter by scope/pattern/series/since/until/min_confidence/limit/since_cursor)
+GET  /v1/signals                          List signals (filter by scope/pattern/series/since/until/min_confidence/limit/since_cursor/order)
 GET  /v1/signals/<id>                     Fetch a single signal with evidence
 GET  /v1/signals/stream                   Server-Sent Events feed (requires scheduler enabled)
 ```
@@ -341,7 +341,7 @@ The gRPC service is defined in [`api/proto/chronos/v1/chronos.proto`](api/proto/
 |---|---|
 | `Ingest` | Push a single observation. Unary — batch ingest is `IngestBatch`. |
 | `IngestBatch` | Persist many observations (all-or-nothing, same cap as HTTP). |
-| `ListSignals` | Filter by scope/pattern/series/since/until/min_confidence/limit/`since_cursor`. Returns `next_cursor`. |
+| `ListSignals` | Filter by scope/pattern/series/since/until/min_confidence/limit/`since_cursor`. Returns `next_cursor`; a `since_cursor` page is oldest first and bounded (500 by default, 1000 max), and `count == limit` means more remain. |
 | `GetSignal` | Fetch a single signal by ID |
 | `StreamSignals` | Server-streaming live feed (requires scheduler; Unimplemented otherwise) |
 | `ValidateConfig` | Dry-run a candidate `CHRONOS_*` env map |

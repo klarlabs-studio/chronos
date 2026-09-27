@@ -28,6 +28,7 @@ func signalGroups() []group {
 		{"Signal/Retention", signalRetention},
 		{"Signal/Concurrency", signalConcurrency},
 		{"Signal/LargeEvidence", signalLargeEvidence},
+		{"Signal/CursorPaging", signalCursorPaging},
 	}
 }
 

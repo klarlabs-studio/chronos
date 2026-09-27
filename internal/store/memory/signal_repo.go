@@ -88,6 +88,9 @@ func (r *SignalRepository) List(_ context.Context, filter ports.SignalFilter) ([
 		out = append(out, sig)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		if filter.Forward() {
+			return cursorLess(out[i].DetectedAt, out[i].ID, out[j].DetectedAt, out[j].ID)
+		}
 		if !out[i].DetectedAt.Equal(out[j].DetectedAt) {
 			return out[i].DetectedAt.After(out[j].DetectedAt)
 		}
@@ -191,9 +194,21 @@ func matches(sig domain.Signal, f ports.SignalFilter) bool {
 	if f.MinConfidence != nil && sig.Confidence < *f.MinConfidence {
 		return false
 	}
+	if f.After != nil && !cursorLess(f.After.DetectedAt, f.After.ID, sig.DetectedAt, sig.ID) {
+		return false
+	}
 	if f.Window != nil &&
 		(!sig.Window.Start.Equal(f.Window.Start) || !sig.Window.End.Equal(f.Window.End)) {
 		return false
 	}
 	return true
+}
+
+// cursorLess orders (DetectedAt, ID) pairs the way the SQL stores do:
+// time first, then the canonical lowercase id string.
+func cursorLess(at time.Time, id uuid.UUID, otherAt time.Time, otherID uuid.UUID) bool {
+	if !at.Equal(otherAt) {
+		return at.Before(otherAt)
+	}
+	return id.String() < otherID.String()
 }

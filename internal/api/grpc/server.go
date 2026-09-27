@@ -94,32 +94,20 @@ func (s *Server) ListSignals(ctx context.Context, req *chronosv1.ListSignalsRequ
 	}
 
 	if req.SinceCursor != "" {
-		cursorAt, _, err := httapi.DecodeListCursor(req.SinceCursor)
+		cursorAt, cursorID, err := httapi.DecodeListCursor(req.SinceCursor)
 		if err != nil {
 			return nil, status.Error(codes.InvalidArgument, "invalid since_cursor: "+err.Error())
 		}
-		filter.Since = &cursorAt
+		filter.After = &ports.SignalCursor{DetectedAt: cursorAt, ID: cursorID}
 	}
+	// Same bounded, oldest-first paging as HTTP. A full page (count ==
+	// the request limit, or 500 when none was sent) means more remain.
+	httapi.PageForward(&filter)
 
 	sigs, err := s.signals.List(ctx, filter)
 	if err != nil {
 		s.logger.Error("grpc list signals failed", "err", err)
 		return nil, status.Error(codes.Internal, "list signals failed")
-	}
-
-	if req.SinceCursor != "" {
-		cursorAt, cursorID, err := httapi.DecodeListCursor(req.SinceCursor)
-		if err != nil {
-			return nil, status.Error(codes.InvalidArgument, "invalid since_cursor: "+err.Error())
-		}
-		kept := sigs[:0]
-		for _, sig := range sigs {
-			if sig.DetectedAt.Equal(cursorAt) && sig.ID.String() <= cursorID.String() {
-				continue
-			}
-			kept = append(kept, sig)
-		}
-		sigs = kept
 	}
 
 	out := make([]*chronosv1.Signal, 0, len(sigs))
@@ -131,8 +119,8 @@ func (s *Server) ListSignals(ctx context.Context, req *chronosv1.ListSignalsRequ
 		Signals: out,
 		Count:   int32(len(out)), //nolint:gosec // bounded by query limit; no overflow risk
 	}
-	if len(sigs) > 0 {
-		resp.NextCursor = httapi.EncodeListCursor(sigs[0].DetectedAt, sigs[0].ID)
+	if next, ok := httapi.NextCursor(filter, sigs); ok {
+		resp.NextCursor = httapi.EncodeListCursor(next.DetectedAt, next.ID)
 	}
 	return resp, nil
 }
