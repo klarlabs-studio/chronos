@@ -2,6 +2,8 @@ package detect
 
 import (
 	"context"
+	"math"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -141,5 +143,27 @@ func TestPearsonCorrelation(t *testing.T) {
 	}
 	if r := pearsonCorrelation([]float64{1, 1, 1}, []float64{1, 2, 3}); r != 0 {
 		t.Errorf("zero variance produced r=%f, want 0", r)
+	}
+}
+
+// A health-headroom series sits near 0.97 and barely moves. The one-pass
+// formula subtracts n*Σx² from (Σx)² there, two numbers that agree to
+// almost every digit, and the rounding left over was reported as the
+// correlation: Vorhut saw r 1.15 to 1.67 in production, and this sweep
+// reached 206.
+func TestPearsonCorrelation_StaysACorrelationOnANearlyFlatSeries(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for _, eps := range []float64{1e-7, 1e-8, 1e-9, 1e-10} {
+		for trial := 0; trial < 2000; trial++ {
+			xs, ys := make([]float64, 69), make([]float64, 69)
+			base := 0.9 + rng.Float64()*0.09
+			for i := range xs {
+				xs[i] = base + rng.NormFloat64()*eps
+				ys[i] = base + 0.5*(xs[i]-base) + rng.NormFloat64()*eps*0.3
+			}
+			if r := pearsonCorrelation(xs, ys); math.Abs(r) > 1 {
+				t.Fatalf("eps %g trial %d: r = %v, outside [-1, 1]", eps, trial, r)
+			}
+		}
 	}
 }
