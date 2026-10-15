@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: ["1.25"]
+        go-version: ["1.26"]
 
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +44,11 @@ jobs:
         run: go test -race -count=1 -coverprofile=coverage.out ./...
 
       - name: Install coverctl
-        if: matrix.go-version == '1.25'
+        if: matrix.go-version == '1.26'
         run: go install go.klarlabs.de/coverctl@v1.17.0
 
       - name: Enforce coverage policy
-        if: matrix.go-version == '1.25'
+        if: matrix.go-version == '1.26'
         run: coverctl check --profile ./coverage.out --from-profile -o json
         # `coverctl check` exits 1 on any domain falling below its
         # threshold in .coverctl.yaml. Tighten thresholds with
@@ -63,7 +63,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       - name: golangci-lint
@@ -80,7 +80,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       - name: Build
@@ -111,7 +111,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       - name: Run postgres integration tests
@@ -140,7 +140,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       - name: Run mysql integration tests
@@ -158,7 +158,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
 
       - name: Validate goreleaser config
