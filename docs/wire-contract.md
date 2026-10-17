@@ -35,7 +35,7 @@ Before 0.25.0 a cursor returned every signal since itself, newest first. A consu
 | `threshold_used` | The configured cutoff the detector compared against. |
 | `detector_version` | Stable tag. Bump the suffix when math or evidence shape changes. |
 
-Current `detector_version` values: `recurrence-v2`, `trend-v2`, `spike-v3`, `drop-v3`, `stall-v1`, `anomaly-v1`, `seasonality-v2`, `correlation-v2`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v2`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
+Current `detector_version` values: `recurrence-v2`, `trend-v2`, `spike-v3`, `drop-v3`, `stall-v1`, `anomaly-v1`, `seasonality-v3`, `correlation-v3`, `changepoint-v1`, `outlier_cluster-v1`, `cross_scope_correlation-v3`, `oscillation-v1`, `divergence-v2`, `convergence-v2`.
 
 Which detectors treat time as order, as a rate, as a join, or as a period is in [`temporal-semantics.md`](temporal-semantics.md).
 
@@ -177,7 +177,7 @@ Autocorrelation is interpreted as a wall-clock period only when the sampling cad
 
 ### Correlation — `Pattern: "correlation"`
 
-Pearson `r` is computed on temporally aligned pairs (`correlation-v2`), not on slice indexes. `CHRONOS_ALIGN_TOLERANCE` is `0` by default (timestamps must be equal). `n` counts aligned pairs. A morning series and an afternoon series with the same values produce no signal when no pair falls inside the tolerance.
+Pearson `r` is computed on temporally aligned pairs (`correlation-v2`), not on slice indexes. Since `correlation-v3`, `seasonality-v3` and `cross_scope_correlation-v3`, `r` is computed from deviations about the mean and clamped to [-1, 1]; the one-pass formula before it could report |r| > 1 on a series that sits far from zero and barely moves. `CHRONOS_ALIGN_TOLERANCE` is `0` by default (timestamps must be equal). `n` counts aligned pairs. A morning series and an afternoon series with the same values produce no signal when no pair falls inside the tolerance.
 
 One signal per pair, deterministically owned by the lex-smaller series ID; the partner appears in evidence. The window runs from the earliest aligned timestamp to the latest, not across observations that were excluded.
 
