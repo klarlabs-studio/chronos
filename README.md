@@ -175,7 +175,7 @@ import "github.com/felixgeelhaar/chronos/client"   // HTTP / gRPC consumer SDK
 ```
 
 ```bash
-go get github.com/felixgeelhaar/chronos@latest     # requires Go 1.25+
+go get github.com/felixgeelhaar/chronos@latest     # requires Go 1.26+
 ```
 
 **Optional CLI** (`go install` or a release archive) if you want to run `chronos serve` locally:

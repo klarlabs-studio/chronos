@@ -202,30 +202,39 @@ func clamp01(x float64) float64 {
 // between xs and ys, or 0 when either series is degenerate (length
 // mismatch, fewer than two points, zero variance, or sums that
 // overflow to ±Inf and leave the coefficient undefined).
+//
+// Two passes, deviations from the mean first. The one-pass form
+// n·Σxy − Σx·Σy subtracts two nearly equal numbers whenever a series
+// sits far from zero and barely moves — a health-headroom series near
+// 0.97 is exactly that — and its rounding error came out as |r| well
+// above 1. The result is clamped because even centred sums can round
+// a perfect correlation a hair past it.
 func pearsonCorrelation(xs, ys []float64) float64 {
 	if len(xs) != len(ys) || len(xs) < 2 {
 		return 0
 	}
 	n := float64(len(xs))
-	var sumX, sumY, sumXY, sumXX, sumYY float64
+	var sumX, sumY float64
 	for i := range xs {
 		sumX += xs[i]
 		sumY += ys[i]
-		sumXY += xs[i] * ys[i]
-		sumXX += xs[i] * xs[i]
-		sumYY += ys[i] * ys[i]
 	}
-	num := n*sumXY - sumX*sumY
-	denX := n*sumXX - sumX*sumX
-	denY := n*sumYY - sumY*sumY
-	if denX <= 0 || denY <= 0 || !isFinite(denX) || !isFinite(denY) {
+	meanX, meanY := sumX/n, sumY/n
+	var sxy, sxx, syy float64
+	for i := range xs {
+		dx, dy := xs[i]-meanX, ys[i]-meanY
+		sxy += dx * dy
+		sxx += dx * dx
+		syy += dy * dy
+	}
+	if sxx <= 0 || syy <= 0 || !isFinite(sxx) || !isFinite(syy) {
 		return 0
 	}
-	r := num / math.Sqrt(denX*denY)
+	r := sxy / math.Sqrt(sxx*syy)
 	if !isFinite(r) {
 		return 0
 	}
-	return r
+	return math.Max(-1, math.Min(1, r))
 }
 
 // autocorrelation returns the Pearson correlation between a series and
