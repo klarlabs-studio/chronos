@@ -6,6 +6,25 @@ The wire contract documented in [`docs/wire-contract.md`](docs/wire-contract.md)
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-17
+
+### Fixed
+- **Pearson r stays in [-1, 1] (`correlation-v3`, `seasonality-v3`,
+  `cross_scope_correlation-v3`).** The one-pass formula n·Σxy − Σx·Σy
+  cancels catastrophically when a series sits far from zero and barely
+  moves — a health score near 0.97 is exactly that — and its rounding
+  error was reported as the correlation: r 1.15 to 1.67 in production, and
+  up to 206 on near-flat test input. r is now computed from deviations
+  about the mean and clamped (#112).
+
+### Security
+- **golang.org/x/net 0.60.0**, for five HTTP/2 server advisories
+  (GO-2026-6603, -6610, -6611, -6612, -6617) the gRPC server reaches (#112).
+
+### Changed
+- **Go 1.26 is the minimum**, which x/net 0.60.0 requires. Go 1.25 is past
+  upstream support (#112).
+
 ## [0.26.0] - 2026-09-27
 
 ### Fixed
