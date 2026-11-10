@@ -1,138 +1,15 @@
-# Standalone nox security scan — mirrors the `security` job of the reusable
-# felixgeelhaar/.github go-ci.yml, kept separate so it never touches the
-# existing required-check job names in ci.yml (test / lint / build /
-# integration-postgres / integration-mysql / release-check) or the pre-existing
-# security.yml nox job (Security / nox-scan), which stays as-is.
-#
-# Pinned + sha256-verified nox 1.22.1, cosign for signed-plugin trust,
-# source-to-sink taint SAST, SARIF -> GitHub code scanning, and a
-# self-adjusting gate: report-only until a nox baseline exists (a baseline is
-# committed at .nox/baseline.json, so this gate enforces net-new critical/high
-# and stays green while known findings remain waived).
-name: Nox Security Scan
+name: Security
 
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-  # No paths-ignore on pull_request. This workflow supplies the
-  # REQUIRED check "Security (nox)", and a required check that is
-  # skipped never reports -- GitHub leaves the PR "blocked" forever with
-  # every other check green. A docs-only or CHANGELOG-only PR could not
-  # be merged at all, which is the likeliest reason #61 sat open from
-  # August. The scan is ~30s; that is cheaper than the trap.
   pull_request:
-    branches: [main]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
   security-events: write
+  pull-requests: write
 
 jobs:
-  security:
-    name: Security (nox)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      pull-requests: write   # nox annotate
-    env:
-      NOX_VERSION: "1.30.1"
-      NOX_SHA256: "e90114e9f37b038af6d2e7f603c5f40684d7a3120f4f377b8a5741aba1b031da"
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Install nox (pinned + sha256-verified binary)
-        # Unpack in a temp dir, NOT the checkout. The release tarball ships
-        # LICENSE, README.md and nox, so extracting here overwrote chronos's own
-        # README.md and LICENSE -- and the very next step scanned the result.
-        # The scan was corrupting the tree it was scanning.
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          curl -fsSL -o "$tmp/nox.tar.gz" \
-            "https://github.com/nox-hq/nox/releases/download/v${NOX_VERSION}/nox_${NOX_VERSION}_linux_amd64.tar.gz"
-          echo "${NOX_SHA256}  $tmp/nox.tar.gz" | sha256sum -c -
-          tar xzf "$tmp/nox.tar.gz" -C "$tmp"
-          sudo install -m 0755 "$tmp/nox" /usr/local/bin/nox
-          rm -rf "$tmp"
-          nox version
-
-      - name: Install cosign
-        # nox verifies plugin signatures by shelling out to cosign. Without it,
-        # signed plugins can't be promoted past "unverified" and install is
-        # blocked under the default community-trust policy.
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-      - name: Install taint-analysis plugin
-        continue-on-error: true  # plugin registry 404s are not a security failure
-        # nox owns code-level SAST: source-to-sink taint (SSRF, injection, path
-        # traversal). The plugin is cosign-signed; with cosign present nox
-        # promotes it to community trust and installs it (no bypass).
-        run: nox plugin install nox/taint-analysis@0.7.0
-
-      - name: Scan
-        run: nox scan . -format json,sarif -output nox-results || true
-
-      - name: Upload SARIF to code scanning
-        if: always() && hashFiles('nox-results/results.sarif') != ''
-        # Never fail the security job on a reporting step. Code scanning needs
-        # Code Security enabled, which private repos without GHAS do not have --
-        # there the upload returns "Resource not accessible by integration" even
-        # with security-events: write. The gate below is what decides; this step
-        # only publishes what the gate already decided.
-        continue-on-error: true
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4
-        with:
-          sarif_file: nox-results/results.sarif
-
-      - name: Annotate PR
-        if: github.event_name == 'pull_request' && hashFiles('nox-results/findings.json') != ''
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: nox annotate -input nox-results/findings.json || true
-
-      - name: Gate on net-new critical/high findings
-        # Self-adjusting: report-only until the repo commits a nox baseline,
-        # then gates net-new critical/high. Adopting the workflow never breaks a
-        # red build on day one.
-        #
-        # Deliberately NOT guarded by hashFiles(findings.json). A missing file
-        # used to skip this step, and a skipped step is GREEN -- so the gate
-        # quietly ceased to exist whenever nox wrote no JSON (e.g. a .nox.yaml
-        # output.format key overriding the -format above). Absence is handled
-        # in-script below and is fatal, since chronos commits a baseline.
-        if: always()
-        run: |
-          f=nox-results/findings.json
-          if [ ! -f "$f" ]; then
-            echo "::error::nox wrote no findings.json, so the security gate evaluated nothing. Most likely .nox.yaml sets output.format, which overrides this workflow's '-format json,sarif' -- drop that key, or include json in it."
-            exit 1
-          fi
-          baselined=$(jq '[.findings[]? | select(.Status=="baselined")] | length' "$f" 2>/dev/null || echo 0)
-          new=$(jq '[.findings[]? | select((.Severity=="critical" or .Severity=="high") and (.Status!="baselined"))] | length' "$f" 2>/dev/null || echo 0)
-          echo "net-new critical/high: $new (baselined findings: $baselined)"
-          if [ "$baselined" -eq 0 ]; then
-            echo "::notice::No nox baseline established — security gate is report-only. Run 'nox baseline add' and commit .nox/ to enforce net-new critical/high."
-            exit 0
-          fi
-          if [ "$new" -gt 0 ]; then
-            echo "::error::Net-new critical/high findings. Run 'nox baseline add' or remediate."
-            jq '.findings[] | select((.Severity=="critical" or .Severity=="high") and (.Status!="baselined")) | {severity:.Severity, rule:.RuleID, file:.Location.FilePath, line:.Location.StartLine}' "$f"
-            exit 1
-          fi
-
-      - name: Upload nox artifacts
-        if: always() && hashFiles('nox-results/**') != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: nox-results
-          path: nox-results/
-          retention-days: 7
+  nox:
+    uses: klarlabs-studio/.github/.github/workflows/nox.yml@main
