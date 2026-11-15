@@ -8,6 +8,7 @@
   <a href="https://github.com/felixgeelhaar/chronos/actions"><img src="https://github.com/felixgeelhaar/chronos/workflows/CI/badge.svg" alt="CI Status"></a>
   <a href="https://goreportcard.com/report/github.com/felixgeelhaar/chronos"><img src="https://goreportcard.com/badge/github.com/felixgeelhaar/chronos" alt="Go Report Card"></a>
   <a href="https://pkg.go.dev/github.com/felixgeelhaar/chronos"><img src="https://pkg.go.dev/badge/github.com/felixgeelhaar/chronos.svg" alt="Go Reference"></a>
+  <a href=".github/workflows/nox-scan.yml"><img src=".github/nox-badge.svg" alt="nox security grade"></a>
   <a href="https://github.com/felixgeelhaar/chronos/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
 
