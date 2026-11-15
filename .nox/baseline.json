@@ -1304,6 +1304,102 @@
       "severity": "",
       "reason": "Intentional pattern in nox migration workflows: workflow_dispatch (IAC-308) and contents:write (IAC-314) required by nox-remediate reusable; cancel-in-progress (IAC-309) matches central go-ci concurrency. Mirrors felixgeelhaar/preflight #128.",
       "created_at": "2026-07-11T11:18:54.766846Z"
+    },
+    {
+      "fingerprint": "9b4fe2a543dffb5b47c7ed90836e7c3d785e735a53ce2c7ac41b408d6f0df9bc",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/integration.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is deliberate for manual runs; requires repo write access and each workflow has least-privilege permissions. No environment gate wanted.",
+      "created_at": "2026-11-15T10:54:08.727563Z"
+    },
+    {
+      "fingerprint": "efffd45e45bdf218052ebd23a0a2fc2295219290f6341d868fed455c871b6993",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/nox-remediate.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is deliberate for manual runs; requires repo write access and each workflow has least-privilege permissions. No environment gate wanted.",
+      "created_at": "2026-11-15T10:54:08.727563Z"
+    },
+    {
+      "fingerprint": "09d79998b5c7424a284b643b53815f6c9ba525b7adfd07bbadfde073aac67c21",
+      "rule_id": "IAC-155",
+      "file_path": ".github/workflows/release.yml",
+      "severity": "medium",
+      "reason": "Reviewed: workflow_dispatch is deliberate for manual runs; requires repo write access and each workflow has least-privilege permissions. No environment gate wanted.",
+      "created_at": "2026-11-15T10:54:08.727563Z"
+    },
+    {
+      "fingerprint": "6c030c5adee52a0cac43f26dce0e8ce9cc32b62ae252833a32b51231c3100021",
+      "rule_id": "IAC-179",
+      "file_path": "test/integration/docker-compose.yml",
+      "severity": "low",
+      "reason": "Reviewed: ephemeral integration smoke-test compose stack runs as root only because Docker creates the named /data volume root-owned (see comments in the file); never deployed.",
+      "created_at": "2026-11-15T10:54:12.794684Z"
+    },
+    {
+      "fingerprint": "20c572c21a3c07d0588eb1e2134b67a15db9dd6aadb46209febe32e684cf778d",
+      "rule_id": "IAC-179",
+      "file_path": "test/integration/docker-compose.yml",
+      "severity": "low",
+      "reason": "Reviewed: ephemeral integration smoke-test compose stack runs as root only because Docker creates the named /data volume root-owned (see comments in the file); never deployed.",
+      "created_at": "2026-11-15T10:54:12.794684Z"
+    },
+    {
+      "fingerprint": "2d75c550b8f96c6d574fdc1a672135a70bc41d50879bc8ff7f18beb919f3cbe9",
+      "rule_id": "IAC-501",
+      "file_path": "test/integration/docker-compose.yml",
+      "severity": "low",
+      "reason": "Reviewed: ephemeral integration smoke-test compose stack runs as root only because Docker creates the named /data volume root-owned (see comments in the file); never deployed.",
+      "created_at": "2026-11-15T10:54:12.794684Z"
+    },
+    {
+      "fingerprint": "7b57afe602140d1f05e7ca57168e06075543e0ee69d4c1419c99366b57fc05f3",
+      "rule_id": "IAC-501",
+      "file_path": "test/integration/docker-compose.yml",
+      "severity": "low",
+      "reason": "Reviewed: ephemeral integration smoke-test compose stack runs as root only because Docker creates the named /data volume root-owned (see comments in the file); never deployed.",
+      "created_at": "2026-11-15T10:54:12.794684Z"
+    },
+    {
+      "fingerprint": "739e462b5efd69933915ec7ad09def3fc36e907a51f855cc4986fe4b7c05c1b8",
+      "rule_id": "IAC-018",
+      "file_path": ".github/workflows/nox-scan.yml",
+      "severity": "low",
+      "reason": "Reviewed: legacy hand-written nox-scan.yml, replaced by the shared nox workflow in PR #114; entry is obsolete once that merges.",
+      "created_at": "2026-11-15T10:54:15.904006Z"
+    },
+    {
+      "fingerprint": "986a7eb181cb2b7185784b87240e5cdf8de94c039012d4846a0f00649b1eddec",
+      "rule_id": "SEC-073",
+      "file_path": "internal/store/store_test.go",
+      "severity": "critical",
+      "reason": "Reviewed false positive: placeholder DSN (u:p@h) in a connection-string passthrough unit test; not a credential. Second entry because two identical fingerprints repeat.",
+      "created_at": "2026-07-06T09:09:35.07215Z"
+    },
+    {
+      "fingerprint": "739e462b5efd69933915ec7ad09def3fc36e907a51f855cc4986fe4b7c05c1b8",
+      "rule_id": "IAC-018",
+      "file_path": ".github/workflows/nox-scan.yml",
+      "severity": "low",
+      "reason": "Reviewed: legacy hand-written nox-scan.yml, replaced by the shared nox workflow in PR #114; entry is obsolete once that merges.",
+      "created_at": "2026-11-15T10:54:15.904006Z"
+    },
+    {
+      "fingerprint": "685a2f4b9461897e460c17088ff2b04ee85d6586cb4442b69adf3ec2c8e9ee21",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/nox-scan.yml",
+      "severity": "medium",
+      "reason": "Reviewed under nox 1.30.1 (current CI pin): low-confidence workflow-permission heuristic on a step that needs the permission; accepted.",
+      "created_at": "2026-11-15T11:03:44.596099Z"
+    },
+    {
+      "fingerprint": "df5b5f3034c7cbc4e84ede14ce5ac9008f6a8f561582bf1070506ced3428f70a",
+      "rule_id": "IAC-153",
+      "file_path": ".github/workflows/security.yml",
+      "severity": "medium",
+      "reason": "Reviewed under nox 1.30.1 (current CI pin): low-confidence workflow-permission heuristic on a step that needs the permission; accepted.",
+      "created_at": "2026-11-15T11:03:44.596099Z"
     }
   ]
 }
